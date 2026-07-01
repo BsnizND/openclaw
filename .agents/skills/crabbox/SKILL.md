@@ -15,6 +15,32 @@ Crabbox is the transport/orchestration surface. The actual backend can be:
   `cbx_...`, `syncDelegated=false`
 - Blacksmith Testbox through Crabbox: delegated provider,
   `provider=blacksmith-testbox`, ids like `tbx_...`, `syncDelegated=true`
+- local disposable container: direct local provider, `provider=local-container`,
+  lease ids like `cbx_...`, `syncDelegated=false`
+
+For Brian/operator contributor work in this repo, default to
+`provider=local-container` for focused behavior proof, CLI/Gateway proof, docs
+sanity, and narrow E2E scenarios when a Docker-backed Linux container can
+exercise the user path. This keeps contributor proof free of third-party hosted
+subscriptions and avoids implying maintainer CI parity. Always report it as
+local Crabbox with the actual provider, lease id, and slug.
+
+Keep the local-Crabbox default inside the repo contribution rules. Before
+opening, updating, or re-reviewing a contributor PR, apply `CONTRIBUTING.md`:
+reuse or create the issue when the work is non-trivial, route features and
+architecture changes through an issue or Discord first, avoid refactor-only and
+known-main test/CI-only PRs unless a maintainer requested them, keep one focused
+change per PR, put proof in the PR body's `Evidence` section instead of only in
+comments, leave fork PRs maintainer-editable when safe, do not edit
+`CHANGELOG.md`, and resolve or reply to addressed bot review conversations.
+
+Hosted providers are opt-in. Use Blacksmith Testbox, brokered AWS/Azure/GCP, or
+other hosted Crabbox backends only when the task needs CI-parity broad gates,
+repo secrets, hosted services, true provider auth, cross-machine/network
+behavior, cross-OS proof, or a maintainer explicitly asks for hosted proof. If
+hosted auth, broker login, CLI setup, subscription, quota, or cloud project
+state is missing, report that blocker instead of recommending a new paid
+account or silently downgrading/overstating the proof.
 
 For OpenClaw maintainer broad `pnpm` gates, Blacksmith Testbox through the
 Crabbox wrapper is acceptable and often preferred when the standing Testbox

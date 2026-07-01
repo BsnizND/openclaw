@@ -128,6 +128,21 @@ Skills own workflows; root owns hard policy and routing.
 ## Validation
 
 - Use `$openclaw-testing` for test/CI choice and `$crabbox` for remote/full/E2E proof.
+- Local Crabbox is the default contributor proof lane for focused behavior, CLI,
+  Gateway, docs, and narrow E2E validation when Docker/local-container can
+  exercise the user path. Report it plainly as `provider=local-container` with
+  the lease id/slug; do not imply CI parity or hosted infrastructure.
+- Hosted Crabbox/Testbox/AWS/Azure/GCP lanes are opt-in proof surfaces. Use them
+  only when the scenario needs CI-parity broad gates, repo secrets, hosted
+  services, provider auth, cross-machine/network behavior, cross-OS proof, or a
+  maintainer explicitly asks for hosted proof. If hosted auth/subscription access
+  is missing, report that blocker instead of recommending new paid accounts.
+- Contributor proof still follows `CONTRIBUTING.md`: use existing issues or
+  Discord first for features/architecture, skip refactor-only or known-main
+  test/CI-only PRs unless requested by a maintainer, keep PRs focused, update
+  the durable PR body `Evidence` when proof changes, leave fork PRs
+  maintainer-editable when safe, do not edit `CHANGELOG.md`, and resolve or
+  reply to bot review conversations before asking for re-review.
 - Crabbox request means real scenario proof: install/update/call/repro user path; not just copy tests and run them remotely.
 - Visual proof: use Crabbox, set up like a user, then screenshot-verify. No harness/bypass/shortcut unless explicitly asked.
 - Small/narrow tests, lints, format checks, and type probes are fine locally only in a healthy normal checkout.
