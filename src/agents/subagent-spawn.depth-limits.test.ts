@@ -79,6 +79,12 @@ describe("subagent spawn depth + child limits", () => {
       getRuntimeConfig: () => hoisted.configOverride,
       registerSubagentRunMock: hoisted.registerSubagentRunMock,
       updateSessionStoreMock: hoisted.updateSessionStoreMock,
+      resolveAgentConfig: (cfg, agentId) =>
+        (
+          cfg.agents as
+            | { list?: Array<{ id?: string; subagents?: Record<string, unknown> }> }
+            | undefined
+        )?.list?.find((agent) => agent.id === agentId),
       getSubagentDepthFromSessionStore: (sessionKey) => hoisted.depthBySession.get(sessionKey) ?? 0,
       countActiveRunsForSession: (sessionKey) =>
         hoisted.activeChildrenBySession.get(sessionKey) ?? 0,
@@ -157,6 +163,154 @@ describe("subagent spawn depth + child limits", () => {
     }
     expect(childSession.inheritedToolAllow).toEqual(["sessions_spawn", "read"]);
     expect(childSession.inheritedToolDeny).toEqual(["exec", "read"]);
+    expect(accepted.toolPolicySource).toBe("caller");
+  });
+
+  it("keeps caller tool-policy inheritance as the cross-agent compatibility default", async () => {
+    hoisted.configOverride = createSubagentSpawnTestConfig("/tmp/workspace-main", {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace-main",
+          subagents: { maxSpawnDepth: 1 },
+        },
+        list: [
+          {
+            id: "main",
+            workspace: "/tmp/workspace-main",
+            subagents: { allowAgents: ["worker"] },
+          },
+          { id: "worker", workspace: "/tmp/workspace-worker" },
+        ],
+      },
+    });
+
+    const result = await spawnSubagentDirect(
+      { task: "delegate with compatibility policy", agentId: "worker" },
+      {
+        agentSessionKey: "agent:main:main",
+        inheritedToolAllowlist: ["sessions_spawn", "read"],
+        inheritedToolDenylist: ["exec", "browser"],
+      },
+    );
+
+    const accepted = expectAccepted(result, "run-1");
+    const childSession = persistedStore?.[accepted.childSessionKey];
+    if (!childSession) {
+      throw new Error("Expected persisted child session");
+    }
+    expect(accepted.childSessionKey).toMatch(/^agent:worker:subagent:/);
+    expect(accepted.toolPolicySource).toBe("caller");
+    expect(childSession.inheritedToolAllow).toEqual(["sessions_spawn", "read"]);
+    expect(childSession.inheritedToolDeny).toEqual(["exec", "browser"]);
+  });
+
+  it("uses the target policy for an opted-in cross-agent native spawn", async () => {
+    hoisted.configOverride = createSubagentSpawnTestConfig("/tmp/workspace-main", {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace-main",
+          subagents: { maxSpawnDepth: 1 },
+        },
+        list: [
+          {
+            id: "main",
+            workspace: "/tmp/workspace-main",
+            subagents: {
+              allowAgents: ["worker"],
+              crossAgentToolPolicy: "target",
+            },
+          },
+          { id: "worker", workspace: "/tmp/workspace-worker" },
+        ],
+      },
+    });
+
+    const result = await spawnSubagentDirect(
+      { task: "delegate under worker policy", agentId: "worker" },
+      {
+        agentSessionKey: "agent:main:main",
+        inheritedToolAllowlist: ["sessions_spawn", "read"],
+        inheritedToolDenylist: ["exec", "browser"],
+      },
+    );
+
+    const accepted = expectAccepted(result, "run-1");
+    const childSession = persistedStore?.[accepted.childSessionKey];
+    if (!childSession) {
+      throw new Error("Expected persisted child session");
+    }
+    expect(accepted.childSessionKey).toMatch(/^agent:worker:subagent:/);
+    expect(accepted.toolPolicySource).toBe("target");
+    expect(childSession.inheritedToolAllow).toBeUndefined();
+    expect(childSession.inheritedToolDeny).toBeUndefined();
+  });
+
+  it("never drops caller tool policy for same-agent spawns", async () => {
+    hoisted.configOverride = createDepthLimitConfig({
+      maxSpawnDepth: 1,
+      crossAgentToolPolicy: "target",
+    });
+
+    const result = await spawnSubagentDirect(
+      { task: "spawn under the requester agent" },
+      {
+        agentSessionKey: "agent:main:main",
+        inheritedToolAllowlist: ["sessions_spawn", "read"],
+        inheritedToolDenylist: ["exec", "browser"],
+      },
+    );
+
+    const accepted = expectAccepted(result, "run-1");
+    const childSession = persistedStore?.[accepted.childSessionKey];
+    if (!childSession) {
+      throw new Error("Expected persisted child session");
+    }
+    expect(accepted.toolPolicySource).toBe("caller");
+    expect(childSession.inheritedToolAllow).toEqual(["sessions_spawn", "read"]);
+    expect(childSession.inheritedToolDeny).toEqual(["exec", "browser"]);
+  });
+
+  it("lets a requester override a target-policy default back to caller inheritance", async () => {
+    hoisted.configOverride = createSubagentSpawnTestConfig("/tmp/workspace-main", {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace-main",
+          subagents: {
+            maxSpawnDepth: 1,
+            crossAgentToolPolicy: "target",
+          },
+        },
+        list: [
+          {
+            id: "main",
+            workspace: "/tmp/workspace-main",
+            subagents: {
+              allowAgents: ["worker"],
+              crossAgentToolPolicy: "caller",
+            },
+          },
+          { id: "worker", workspace: "/tmp/workspace-worker" },
+        ],
+      },
+    });
+
+    const result = await spawnSubagentDirect(
+      { task: "delegate with requester override", agentId: "worker" },
+      {
+        agentSessionKey: "agent:main:main",
+        inheritedToolAllowlist: ["sessions_spawn", "read"],
+        inheritedToolDenylist: ["exec", "browser"],
+      },
+    );
+
+    const accepted = expectAccepted(result, "run-1");
+    const childSession = persistedStore?.[accepted.childSessionKey];
+    if (!childSession) {
+      throw new Error("Expected persisted child session");
+    }
+    expect(accepted.toolPolicySource).toBe("caller");
+    expect(childSession.inheritedToolAllow).toEqual(["sessions_spawn", "read"]);
+    expect(childSession.inheritedToolDeny).toEqual(["exec", "browser"]);
   });
 
   it("rejects callers when stored spawn depth is already at the configured max", async () => {

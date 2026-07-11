@@ -246,6 +246,10 @@ export const FIELD_HELP: Record<string, string> = {
     'Prompt-only sub-agent delegation strength. "suggest" keeps the default guidance; "prefer" strongly instructs the main agent to delegate anything more involved than a direct reply via sessions_spawn.',
   "agents.list[].subagents.delegationMode":
     "Per-agent override for sub-agent delegation strength. Use this for coordinator agents that should stay responsive and push non-trivial work into spawned sub-agents.",
+  "agents.defaults.subagents.crossAgentToolPolicy":
+    'Selects the tool-policy source for explicit cross-agent native sessions_spawn calls. "caller" (default) preserves the requester\'s effective tool clipping. "target" uses the configured target agent policy; use it only with a narrow allowAgents list and requireAgentId. Same-agent and ACP spawns still inherit caller policy.',
+  "agents.list[].subagents.crossAgentToolPolicy":
+    'Per-agent override for explicit cross-agent native sessions_spawn tool policy. "target" delegates under the configured target agent\'s capabilities without granting those tools to the requester; keep allowAgents exact because later target-policy changes flow into spawned children.',
   "agents.list[].contextInjection":
     "Per-agent override for when workspace bootstrap files are injected into this agent's system prompt. Omit to inherit agents.defaults.contextInjection.",
   "agents.list[].bootstrapMaxChars":

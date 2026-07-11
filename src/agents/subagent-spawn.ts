@@ -209,6 +209,8 @@ export type SpawnSubagentResult = {
   mode?: SpawnSubagentMode;
   taskName?: string;
   note?: string;
+  /** Effective source of the spawned child's inherited tool-policy boundary. */
+  toolPolicySource?: "caller" | "target";
   /** Fully resolved model ref applied to the spawned child session. */
   resolvedModel?: string;
   /** Provider prefix parsed from resolvedModel when the ref includes one. */
@@ -1176,8 +1178,9 @@ export async function spawnSubagentDirect(
   const requesterAgentId = normalizeAgentId(
     ctx.requesterAgentIdOverride ?? parseAgentSessionKey(requesterInternalKey)?.agentId,
   );
+  const requesterAgentConfig = resolveAgentConfig(cfg, requesterAgentId);
   const requireAgentId =
-    resolveAgentConfig(cfg, requesterAgentId)?.subagents?.requireAgentId ??
+    requesterAgentConfig?.subagents?.requireAgentId ??
     cfg.agents?.defaults?.subagents?.requireAgentId ??
     false;
   if (requireAgentId && !requestedAgentId?.trim()) {
@@ -1227,8 +1230,7 @@ export async function spawnSubagentDirect(
     targetAgentId,
     requestedAgentId,
     allowAgents:
-      resolveAgentConfig(cfg, requesterAgentId)?.subagents?.allowAgents ??
-      cfg?.agents?.defaults?.subagents?.allowAgents,
+      requesterAgentConfig?.subagents?.allowAgents ?? cfg?.agents?.defaults?.subagents?.allowAgents,
     configuredAgentIds: resolveConfiguredAgentIds(cfg),
   });
   if (!targetPolicy.ok) {
@@ -1237,6 +1239,14 @@ export async function spawnSubagentDirect(
       error: targetPolicy.error,
     };
   }
+  const configuredCrossAgentToolPolicy =
+    requesterAgentConfig?.subagents?.crossAgentToolPolicy ??
+    cfg.agents?.defaults?.subagents?.crossAgentToolPolicy ??
+    "caller";
+  const toolPolicySource =
+    targetAgentId !== requesterAgentId && configuredCrossAgentToolPolicy === "target"
+      ? "target"
+      : "caller";
   const childSessionKey = `agent:${targetAgentId}:subagent:${crypto.randomUUID()}`;
   const requesterRuntime = resolveSandboxRuntimeStatus({
     cfg,
@@ -1277,7 +1287,6 @@ export async function spawnSubagentDirect(
     maxSpawnDepth,
   });
   const targetAgentDir = resolveAgentDir(cfg, targetAgentId);
-  const requesterAgentConfig = resolveAgentConfig(cfg, requesterAgentId);
   const targetAgentConfig = resolveAgentConfig(cfg, targetAgentId);
   const callerThinkingRaw = readRequesterThinkingLevel({
     cfg,
@@ -1329,8 +1338,12 @@ export async function spawnSubagentDirect(
     spawnDepth: childDepth,
     subagentRole: childCapabilities.role === "main" ? null : childCapabilities.role,
     subagentControlScope: childCapabilities.controlScope,
-    ...inheritedToolAllowPatch(ctx.inheritedToolAllowlist),
-    ...inheritedToolDenyPatch(ctx.inheritedToolDenylist),
+    ...(toolPolicySource === "caller"
+      ? {
+          ...inheritedToolAllowPatch(ctx.inheritedToolAllowlist),
+          ...inheritedToolDenyPatch(ctx.inheritedToolDenylist),
+        }
+      : {}),
     ...plan.initialSessionPatch,
   };
 
@@ -1748,6 +1761,7 @@ export async function spawnSubagentDirect(
     runId: childRunId,
     mode: spawnMode,
     taskName,
+    toolPolicySource,
     note: preparedSpawnContext.forkFallbackNote
       ? `${acceptedNote} ${preparedSpawnContext.forkFallbackNote}`
       : acceptedNote,

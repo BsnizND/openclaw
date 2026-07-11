@@ -22,6 +22,8 @@ export type OptionalBootstrapFileName = "SOUL.md" | "USER.md" | "HEARTBEAT.md" |
 export type EmbeddedAgentExecutionContract = "default" | "strict-agentic";
 /** Prompt-only default for how strongly agents should delegate to sub-agents. */
 export type SubagentDelegationMode = "suggest" | "prefer";
+/** Tool-policy source for explicit cross-agent native sub-agent runs. */
+export type SubagentCrossAgentToolPolicy = "caller" | "target";
 /** Image compression/detail preference used before sending image inputs to models. */
 export type AgentImageQualityPreference = "auto" | "efficient" | "balanced" | "high";
 
@@ -464,6 +466,8 @@ export type AgentDefaultsConfig = {
     delegationMode?: SubagentDelegationMode;
     /** Default allowlist of target agent ids for sessions_spawn. Use "*" to allow any configured target. */
     allowAgents?: string[];
+    /** Tool-policy source for explicit cross-agent native spawns. Default: "caller". */
+    crossAgentToolPolicy?: SubagentCrossAgentToolPolicy;
     /** Max concurrent sub-agent runs (global lane: "subagent"). Default: 8. */
     maxConcurrent?: number;
     /** Maximum depth allowed for sessions_spawn chains. Default behavior: 1 (no nested spawns). */
