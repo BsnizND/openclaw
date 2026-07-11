@@ -74,6 +74,32 @@ describe("agent defaults schema", () => {
     );
   });
 
+  it("accepts cross-agent tool policy on defaults and agent entries", () => {
+    expectSchemaSuccess(
+      AgentDefaultsSchema.safeParse({
+        subagents: {
+          crossAgentToolPolicy: "caller",
+        },
+      }),
+    );
+    expectSchemaSuccess(
+      AgentEntrySchema.safeParse({
+        id: "coordinator",
+        subagents: {
+          crossAgentToolPolicy: "target",
+        },
+      }),
+    );
+    expectSchemaFailurePath(
+      AgentDefaultsSchema.safeParse({
+        subagents: {
+          crossAgentToolPolicy: "merge",
+        },
+      }),
+      "subagents.crossAgentToolPolicy",
+    );
+  });
+
   it("accepts videoGenerationModel", () => {
     expectSchemaSuccess(
       AgentDefaultsSchema.safeParse({

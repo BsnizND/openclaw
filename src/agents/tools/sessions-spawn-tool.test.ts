@@ -482,6 +482,30 @@ describe("sessions_spawn tool", () => {
     expect(result.details).not.toHaveProperty("role");
   });
 
+  it("forwards the accepted child tool-policy source", async () => {
+    hoisted.spawnSubagentDirectMock.mockResolvedValueOnce({
+      status: "accepted",
+      childSessionKey: "agent:worker:subagent:1",
+      runId: "run-worker",
+      toolPolicySource: "target",
+    });
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+    });
+
+    const result = await tool.execute("call-target-policy", {
+      task: "build feature",
+      agentId: "worker",
+    });
+
+    expectDetailFields(result.details, {
+      status: "accepted",
+      childSessionKey: "agent:worker:subagent:1",
+      runId: "run-worker",
+      toolPolicySource: "target",
+    });
+  });
+
   it.each([
     "runTimeoutSeconds",
     "timeoutSeconds",

@@ -347,6 +347,13 @@ See [Configuration reference](/gateway/configuration-reference) and
 <ParamField path="agents.defaults.subagents.requireAgentId" type="boolean" default="false">
   Block `sessions_spawn` calls that omit `agentId` (forces explicit profile selection). Per-agent override: `agents.list[].subagents.requireAgentId`.
 </ParamField>
+<ParamField path="agents.defaults.subagents.crossAgentToolPolicy" type='"caller" | "target"' default="caller">
+  Select the tool-policy source for explicit cross-agent native sub-agent runs.
+  `caller` preserves the requester's effective tool clipping. `target` lets the
+  spawned child use the configured target agent's effective policy before the
+  normal sandbox and sub-agent restriction layers. Per-agent override:
+  `agents.list[].subagents.crossAgentToolPolicy`.
+</ParamField>
 <ParamField path="agents.defaults.subagents.announceTimeoutMs" type="number" default="120000">
   Per-call timeout for gateway `agent` announce delivery attempts. Values are positive integer milliseconds and are clamped to the platform-safe timer maximum. Transient retries can make the total announce wait longer than one configured timeout.
 </ParamField>
@@ -593,6 +600,39 @@ profile stage:
 
 Use per-agent `agents.list[].tools.alsoAllow: ["browser"]` when only one
 agent should get browser automation.
+
+For an explicit cross-agent native spawn, the compatibility default is
+`agents.defaults.subagents.crossAgentToolPolicy: "caller"`, which keeps the
+requester's resolved tool policy as an additional child restriction. Set the
+requester agent's override to `"target"` only when delegation is meant to cross
+that capability boundary:
+
+```json5
+{
+  agents: {
+    list: [
+      {
+        id: "coordinator",
+        subagents: {
+          requireAgentId: true,
+          allowAgents: ["worker"],
+          crossAgentToolPolicy: "target",
+        },
+      },
+      {
+        id: "worker",
+        tools: { profile: "full" },
+      },
+    ],
+  },
+}
+```
+
+This does not grant the worker's tools to the coordinator. It authorizes the
+explicitly allowlisted target session to use its own configured policy. Keep
+`allowAgents` narrow: later changes to the target agent's tool policy will flow
+into future spawned children. Same-agent and ACP spawns always keep caller
+tool-policy inheritance.
 
 ## Concurrency
 

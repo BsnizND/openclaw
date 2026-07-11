@@ -241,6 +241,7 @@ export const AgentDefaultsSchema = z
       .object({
         delegationMode: z.enum(["suggest", "prefer"]).optional(),
         allowAgents: z.array(z.string()).optional(),
+        crossAgentToolPolicy: z.enum(["caller", "target"]).optional(),
         maxConcurrent: z.number().int().positive().optional(),
         maxSpawnDepth: z
           .number()

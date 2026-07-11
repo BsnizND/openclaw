@@ -1297,6 +1297,48 @@ describe("createOpenClawCodingTools", () => {
     expect(names.has("browser")).toBe(true);
   });
 
+  it("keeps requester restrictions while a target-agent child resolves the target profile", () => {
+    const config = {
+      browser: { enabled: true },
+      plugins: { entries: { browser: { enabled: true } } },
+      agents: {
+        list: [
+          {
+            id: "coordinator",
+            tools: {
+              profile: "messaging",
+              deny: ["browser", "exec"],
+            },
+          },
+          {
+            id: "worker",
+            tools: { profile: "full" },
+          },
+        ],
+      },
+    } as OpenClawConfig;
+
+    const requesterNames = toolNameList(
+      createOpenClawCodingTools({
+        sessionKey: "agent:coordinator:main",
+        config,
+      }),
+    );
+    const targetChildNames = toolNameList(
+      createOpenClawCodingTools({
+        sessionKey: "agent:worker:subagent:target-policy",
+        config,
+      }),
+    );
+
+    expect(requesterNames).not.toContain("browser");
+    expect(requesterNames).not.toContain("exec");
+    expect(targetChildNames).toContain("browser");
+    expect(targetChildNames).toContain("exec");
+    expect(targetChildNames).not.toContain("gateway");
+    expect(targetChildNames).not.toContain("sessions_send");
+  });
+
   it("keeps browser out of coding-profile subagents unless profile-stage alsoAllow adds it", () => {
     const baseConfig = {
       browser: { enabled: true },

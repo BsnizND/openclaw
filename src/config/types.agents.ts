@@ -6,6 +6,7 @@ import type {
   AgentDefaultsConfig,
   AgentModelEntryConfig,
   EmbeddedAgentExecutionContract,
+  SubagentCrossAgentToolPolicy,
   SubagentDelegationMode,
 } from "./types.agent-defaults.js";
 import type { AgentModelConfig, AgentSandboxConfig } from "./types.agents-shared.js";
@@ -137,6 +138,8 @@ export type AgentConfig = {
     delegationMode?: SubagentDelegationMode;
     /** Allow spawning sub-agents under other agent ids. Use "*" to allow any configured target. */
     allowAgents?: string[];
+    /** Tool-policy source for explicit cross-agent native spawns. */
+    crossAgentToolPolicy?: SubagentCrossAgentToolPolicy;
     /** Per-agent default model for spawned sub-agents (string or {primary,fallbacks}). */
     model?: AgentModelConfig;
     /** Per-agent default thinking level for spawned sub-agents. */

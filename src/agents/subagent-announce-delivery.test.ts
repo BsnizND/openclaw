@@ -147,6 +147,28 @@ function registerDirectTargetTestChannel(channelId: string): void {
             inferTargetChatType: ({ to }: { to: string }) =>
               to.startsWith("channel:") || to.startsWith("thread:") ? "channel" : "direct",
           },
+          outbound: {
+            deliveryMode: "direct",
+            sendText: async () => ({ channel: channelId, messageId: "test-message" }),
+          },
+        },
+      },
+    ]),
+  );
+}
+
+function registerIngressOnlyTestChannel(channelId: string): void {
+  setActivePluginRegistry(
+    createTestRegistry([
+      {
+        pluginId: channelId,
+        source: "test",
+        plugin: {
+          ...createChannelTestPluginBase({
+            id: channelId,
+            capabilities: { chatTypes: ["direct"] },
+          }),
+          outbound: { deliveryMode: "direct" },
         },
       },
     ]),
@@ -325,6 +347,60 @@ async function deliverTelegramDirectMessageCompletion(params: {
     directIdempotencyKey: "announce-telegram-dm-fallback",
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+  });
+}
+
+async function deliverPluginDirectMessageCompletion(params: {
+  channelId: string;
+  callGateway: typeof runtimeCallGateway;
+  sendMessage?: typeof runtimeSendMessage;
+  directIdempotencyKey: string;
+  runtimeConfig?: Record<string, unknown>;
+}) {
+  const origin = {
+    channel: params.channelId,
+    to: "direct:brian",
+    accountId: "default",
+  };
+  const requesterSessionKey = `agent:main:${params.channelId}:direct:brian`;
+  testing.setDepsForTest({
+    callGateway: params.callGateway,
+    getRequesterSessionActivity: () => ({
+      sessionId: "requester-session-plugin-direct",
+      isActive: false,
+    }),
+    getRuntimeConfig: () => (params.runtimeConfig ?? {}) as never,
+    sendMessage: params.sendMessage ?? runtimeSendMessage,
+  });
+
+  return deliverSubagentAnnouncement({
+    requesterSessionKey,
+    targetRequesterSessionKey: requesterSessionKey,
+    triggerMessage: "child done",
+    steerMessage: "child done",
+    requesterOrigin: origin,
+    requesterSessionOrigin: origin,
+    completionDirectOrigin: origin,
+    directOrigin: origin,
+    requesterIsSubagent: false,
+    expectsCompletionMessage: true,
+    bestEffortDeliver: true,
+    directIdempotencyKey: params.directIdempotencyKey,
+    sourceTool: "subagent_announce",
+    internalEvents: [
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "agent:worker:subagent:child",
+        childSessionId: "child-session-id",
+        announceType: "subagent task",
+        taskLabel: "direct completion smoke",
+        status: "ok",
+        statusLabel: "completed successfully",
+        result: "child completion output",
+        replyInstruction: "Summarize the result.",
+      },
+    ],
   });
 }
 
@@ -4808,6 +4884,102 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       to: "telegram:-1003871627242",
       threadId: "6823",
     });
+  });
+
+  it("keeps ingress-only direct completions session-only under global message-tool policy", async () => {
+    registerIngressOnlyTestChannel("lifeos");
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [{ text: "The LifeOS worker result is ready." }],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverPluginDirectMessageCompletion({
+      channelId: "lifeos",
+      callGateway,
+      sendMessage,
+      directIdempotencyKey: "announce-lifeos-session-only",
+      runtimeConfig: { messages: { visibleReplies: "message_tool" } },
+    });
+
+    expectRecordFields(result, {
+      delivered: true,
+      path: "direct",
+    });
+    const agentParams = expectGatewayAgentParams(callGateway, {
+      deliver: false,
+      channel: "lifeos",
+      accountId: "default",
+      to: "direct:brian",
+      threadId: undefined,
+      idempotencyKey: "announce-lifeos-session-only",
+    });
+    expect(agentParams.sourceReplyDeliveryMode).toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("preserves message-tool completion for a loaded direct channel with real outbound text", async () => {
+    registerDirectTargetTestChannel("qa-outbound");
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [{ text: "The worker result is ready." }],
+        didSendViaMessagingTool: true,
+        messagingToolSentTexts: ["The worker result is ready."],
+      },
+    });
+
+    const result = await deliverPluginDirectMessageCompletion({
+      channelId: "qa-outbound",
+      callGateway,
+      directIdempotencyKey: "announce-qa-outbound",
+      runtimeConfig: { messages: { visibleReplies: "message_tool" } },
+    });
+
+    expectRecordFields(result, {
+      delivered: true,
+      path: "direct",
+    });
+    expectGatewayAgentParams(callGateway, {
+      deliver: false,
+      channel: "qa-outbound",
+      accountId: "default",
+      to: "direct:brian",
+      threadId: undefined,
+      sourceReplyDeliveryMode: "message_tool_only",
+      idempotencyKey: "announce-qa-outbound",
+    });
+  });
+
+  it("keeps the session-only completion idempotency key stable across retries", async () => {
+    registerIngressOnlyTestChannel("lifeos");
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [{ text: "The LifeOS worker result is ready." }],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await deliverPluginDirectMessageCompletion({
+        channelId: "lifeos",
+        callGateway,
+        sendMessage,
+        directIdempotencyKey: "announce-lifeos-stable-retry",
+        runtimeConfig: { messages: { visibleReplies: "message_tool" } },
+      });
+      expectRecordFields(result, { delivered: true, path: "direct" });
+    }
+
+    expect(callGateway).toHaveBeenCalledTimes(2);
+    for (let callIndex = 0; callIndex < 2; callIndex += 1) {
+      const request = expectRecordFields(mockCallArg(callGateway, callIndex), { method: "agent" });
+      expectRecordFields(request.params, {
+        deliver: false,
+        idempotencyKey: "announce-lifeos-stable-retry",
+      });
+    }
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("requires message-tool delivery for direct subagent completions", async () => {

@@ -1073,6 +1073,7 @@ export const AgentEntrySchema = z
       .object({
         delegationMode: z.enum(["suggest", "prefer"]).optional(),
         allowAgents: z.array(z.string()).optional(),
+        crossAgentToolPolicy: z.enum(["caller", "target"]).optional(),
         model: AgentModelSchema.optional(),
         thinking: z.string().optional(),
         requireAgentId: z.boolean().optional(),
