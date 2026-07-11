@@ -1243,6 +1243,24 @@ function stripNonDeliverableChannelForCompletionOrigin(
   return normalizeDeliveryContext(rest);
 }
 
+function hasLoadedExternalTextDeliveryAdapter(channel: string | undefined): boolean {
+  const normalizedChannel = normalizeMessageChannel(channel);
+  if (!normalizedChannel) {
+    return false;
+  }
+
+  const loadedPlugin = getLoadedChannelPluginForRead(normalizedChannel as ChannelId);
+  if (!loadedPlugin) {
+    // Preserve the existing bundled-channel path when a focused caller/test has
+    // not materialized the runtime registry. A loaded plugin is authoritative
+    // when present because its outbound adapter is the actual delivery surface.
+    return true;
+  }
+
+  const outbound = loadedPlugin.outbound;
+  return Boolean(outbound?.sendText || outbound?.sendPayload || outbound?.sendFormattedText);
+}
+
 async function sendSubagentAnnounceDirectly(params: {
   requesterSessionKey: string;
   targetRequesterSessionKey: string;
@@ -1293,7 +1311,10 @@ async function sendSubagentAnnounceDirectly(params: {
       ? effectiveDirectOrigin
       : requesterSessionOrigin;
     const requesterEntry = loadRequesterSessionEntry(params.targetRequesterSessionKey).entry;
-    const deliveryTarget = !params.requesterIsSubagent
+    const externalTextDeliveryAvailable =
+      !params.requesterIsSubagent &&
+      hasLoadedExternalTextDeliveryAdapter(effectiveDirectOrigin?.channel);
+    const deliveryTarget = externalTextDeliveryAvailable
       ? resolveExternalBestEffortDeliveryTarget({
           channel: effectiveDirectOrigin?.channel,
           to: effectiveDirectOrigin?.to,
@@ -1327,6 +1348,7 @@ async function sendSubagentAnnounceDirectly(params: {
         requesterEntry,
         directOrigin: effectiveDirectOrigin,
         requesterSessionOrigin,
+        messageToolAvailable: externalTextDeliveryAvailable,
       });
     const subagentDirectMessageCompletionRequiresMessageTool =
       params.expectsCompletionMessage &&
