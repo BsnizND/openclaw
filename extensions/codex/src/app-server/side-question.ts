@@ -417,6 +417,7 @@ export async function runCodexAppServerSideQuestion(
       const timeoutMs = resolveDynamicToolCallTimeoutMs({
         call,
         config: params.cfg,
+        registeredTimeoutMs: toolBridge.getRegisteredTimeoutMs(call.tool),
       });
       const toolStartedAt = Date.now();
       const diagnosticContext = {

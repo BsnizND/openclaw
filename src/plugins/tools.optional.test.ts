@@ -9,6 +9,7 @@ import { createEmptyPluginRegistry } from "./registry-empty.js";
 type MockRegistryToolEntry = {
   pluginId: string;
   optional: boolean;
+  timeoutMs?: number;
   source: string;
   names: string[];
   declaredNames?: string[];
@@ -1787,6 +1788,26 @@ describe("resolvePluginTools optional tools", () => {
     expect(getPluginToolMeta(second[1])?.optional).toBe(true);
     expect(getPluginToolMeta(second[1])?.trustedLocalMedia).toBe(true);
     expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects plugin-registered execution timeouts onto concrete tools", () => {
+    const factory = vi.fn(() => makeTool("long_workflow"));
+    setRegistry([
+      {
+        pluginId: "multi",
+        optional: false,
+        timeoutMs: 240_000,
+        source: "/tmp/multi.js",
+        names: ["long_workflow"],
+        declaredNames: ["long_workflow"],
+        factory,
+      },
+    ]);
+
+    const tools = resolvePluginTools(createResolveToolsParams());
+
+    expectResolvedToolNames(tools, ["long_workflow"]);
+    expect(getPluginToolMeta(tools[0])?.timeoutMs).toBe(240_000);
   });
 
   it("rejects plugin id collisions with core tool names", () => {

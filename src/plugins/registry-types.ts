@@ -82,6 +82,7 @@ export type PluginToolRegistration = {
   names: string[];
   declaredNames?: string[];
   optional: boolean;
+  timeoutMs?: number;
   source: string;
   rootDir?: string;
 };

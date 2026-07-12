@@ -64,6 +64,8 @@ export type OpenClawPluginToolOptions = {
   name?: string;
   names?: string[];
   optional?: boolean;
+  /** Preferred outer execution budget for harness bridges; runtimes may cap it. */
+  timeoutMs?: number;
 };
 
 export type OpenClawPluginHookOptions = {

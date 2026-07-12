@@ -472,9 +472,11 @@ export function hasPendingDynamicToolTerminalDiagnostic(params: {
 export function resolveDynamicToolCallTimeoutMs(params: {
   call: CodexDynamicToolCallParams;
   config: EmbeddedRunAttemptParams["config"];
+  registeredTimeoutMs?: number;
 }): number {
   return clampDynamicToolTimeoutMs(
     readDynamicToolCallTimeoutMs(params.call.arguments) ??
+      readPositiveFiniteTimeoutMs(params.registeredTimeoutMs) ??
       readConfiguredDynamicToolTimeoutMs(params.call.tool, params.config) ??
       CODEX_DYNAMIC_TOOL_TIMEOUT_MS,
   );

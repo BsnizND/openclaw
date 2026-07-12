@@ -59,6 +59,7 @@ export type PluginToolMcpMeta = {
 export type PluginToolMeta = {
   pluginId: string;
   optional: boolean;
+  timeoutMs?: number;
   replaySafe?: boolean;
   trustedLocalMedia?: boolean;
   mcp?: PluginToolMcpMeta;
@@ -1385,6 +1386,7 @@ export function resolvePluginTools(params: {
       pluginToolMeta.set(tool, {
         pluginId: entry.pluginId,
         optional,
+        ...(entry.timeoutMs !== undefined ? { timeoutMs: entry.timeoutMs } : {}),
         replaySafe: isManifestToolReplaySafe({
           manifestPlugin,
           toolName: tool.name,

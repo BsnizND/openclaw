@@ -2442,6 +2442,7 @@ export async function runCodexAppServerAttempt(
       const dynamicToolTimeoutMs = resolveDynamicToolCallTimeoutMs({
         call,
         config: params.config,
+        registeredTimeoutMs: toolBridge.getRegisteredTimeoutMs(call.tool),
       });
       const toolStartedAt = Date.now();
       let terminalDiagnosticObserved = false;

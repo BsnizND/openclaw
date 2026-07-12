@@ -134,6 +134,7 @@ import type {
   PluginTextTransformsRegistration,
   PluginTrustedToolPolicyRegistryRegistration,
 } from "./registry-types.js";
+import type { OpenClawPluginToolOptions } from "./tool-types.js";
 export type {
   PluginReloadRegistration,
   PluginRuntimeLifecycleRegistryRegistration,
@@ -602,7 +603,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
   const registerTool = (
     record: PluginRecord,
     tool: AnyAgentTool | OpenClawPluginToolFactory,
-    opts?: { name?: string; names?: string[]; optional?: boolean },
+    opts?: OpenClawPluginToolOptions,
   ) => {
     if (pluginsWithChannelRegistrationConflict.has(record.id)) {
       return;
@@ -619,6 +620,16 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     }
     const names = [...(opts?.names ?? []), ...(opts?.name ? [opts.name] : [])];
     const optional = opts?.optional === true;
+    const timeoutMs = opts?.timeoutMs;
+    if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "plugin tool timeoutMs must be a positive safe integer",
+      });
+      return;
+    }
     const factory: OpenClawPluginToolFactory =
       typeof tool === "function" ? tool : (_ctx: OpenClawPluginToolContext) => tool;
 
@@ -650,6 +661,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       names: normalized,
       declaredNames,
       optional,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       source: record.source,
       rootDir: record.rootDir,
     });

@@ -689,7 +689,10 @@ Domain entries use `allow` or `deny`; Unix socket entries use Codex's
 OpenClaw-owned dynamic tool calls are bounded independently from
 `appServer.requestTimeoutMs`: Codex `item/tool/call` requests use a 90
 second OpenClaw watchdog by default. A positive per-call `timeoutMs`
-argument extends or shortens that specific tool budget, capped at 600000 ms.
+argument extends or shortens that specific tool budget. Plugin tools can
+declare their normal outer budget with
+`api.registerTool(tool, { timeoutMs: ... })`; this applies when the call does
+not provide an override. Dynamic-tool budgets are capped at 600000 ms.
 The `image_generate` tool uses `agents.defaults.imageGenerationModel.timeoutMs`
 when the tool call does not provide its own timeout, or a 120 second
 image-generation default otherwise. The media-understanding `image` tool

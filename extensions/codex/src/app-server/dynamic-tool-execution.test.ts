@@ -243,6 +243,54 @@ describe("dynamic tool execution helpers", () => {
     ).toBe(90_000);
   });
 
+  it("uses a plugin-registered timeout for generic dynamic tools", () => {
+    expect(
+      resolveDynamicToolCallTimeoutMs({
+        call: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-plugin-tool",
+          namespace: null,
+          tool: "plugin_workflow",
+          arguments: {},
+        },
+        config: undefined,
+        registeredTimeoutMs: 240_000,
+      }),
+    ).toBe(240_000);
+  });
+
+  it("lets call arguments override registered timeouts and caps both", () => {
+    expect(
+      resolveDynamicToolCallTimeoutMs({
+        call: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-plugin-override",
+          namespace: null,
+          tool: "plugin_workflow",
+          arguments: { timeoutMs: 15_000 },
+        },
+        config: undefined,
+        registeredTimeoutMs: 240_000,
+      }),
+    ).toBe(15_000);
+    expect(
+      resolveDynamicToolCallTimeoutMs({
+        call: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-plugin-cap",
+          namespace: null,
+          tool: "plugin_workflow",
+          arguments: {},
+        },
+        config: undefined,
+        registeredTimeoutMs: CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS + 1,
+      }),
+    ).toBe(CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS);
+  });
+
   it("returns a failed dynamic tool response when an app-server tool call exceeds the deadline", async () => {
     vi.useFakeTimers();
     let capturedSignal: AbortSignal | undefined;

@@ -334,6 +334,7 @@ function hasExplicitNonSourceMessageRoute(
 export type CodexDynamicToolBridge = {
   availableSpecs: CodexDynamicToolSpec[];
   specs: CodexDynamicToolSpec[];
+  getRegisteredTimeoutMs: (toolName: string) => number | undefined;
   handleToolCall: (
     params: CodexDynamicToolCallParams,
     options?: {
@@ -406,6 +407,12 @@ export function createCodexDynamicToolBridge(params: {
     params.registeredTools ? registeredProjection.tools : availableTools
   ).filter((entry) => !quarantinedAvailableToolNames.has(entry.name));
   const toolMap = new Map(availableTools.map((entry) => [entry.name, entry]));
+  const registeredTimeoutMsByName = new Map(
+    availableProjection.tools.flatMap((entry) => {
+      const timeoutMs = getPluginToolMeta(entry.tool)?.timeoutMs;
+      return timeoutMs === undefined ? [] : [[entry.name, timeoutMs] as const];
+    }),
+  );
   const registeredToolNames = new Set(registeredSpecTools.map((entry) => entry.name));
   const quarantinedTools = dedupeQuarantinedDynamicTools([
     ...availableProjection.quarantinedTools,
@@ -453,6 +460,7 @@ export function createCodexDynamicToolBridge(params: {
       loading: params.loading ?? "searchable",
       directToolNames,
     }),
+    getRegisteredTimeoutMs: (toolName) => registeredTimeoutMsByName.get(toolName),
     telemetry,
     handleToolCall: async (call, options) => {
       const toolEntry = toolMap.get(call.tool);

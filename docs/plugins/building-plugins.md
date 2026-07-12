@@ -247,10 +247,16 @@ register(api) {
         return { content: [{ type: "text", text: params.pipeline }] };
       },
     },
-    { optional: true },
+    { optional: true, timeoutMs: 240_000 },
   );
 }
 ```
+
+`timeoutMs` declares the tool's preferred outer execution budget for harness
+bridges. Use a positive integer when the tool normally needs longer than the
+harness default; each harness may apply its own safety cap. The Codex harness
+honors registered budgets up to 600000 ms, while a model-supplied per-call
+timeout still takes precedence.
 
 Every tool registered with `api.registerTool(...)` must also be declared in the
 plugin manifest:

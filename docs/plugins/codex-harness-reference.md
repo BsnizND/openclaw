@@ -390,6 +390,8 @@ OpenClaw-owned dynamic tool calls are bounded independently from
 first available timeout in this order:
 
 - A positive per-call `timeoutMs` argument.
+- A positive timeout registered by the owning plugin with
+  `api.registerTool(tool, { timeoutMs: ... })`.
 - For `image_generate`, `agents.defaults.imageGenerationModel.timeoutMs`.
 - For `image_generate` without a configured timeout, the 120 second
   image-generation default.
