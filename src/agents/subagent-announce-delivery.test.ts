@@ -254,6 +254,7 @@ async function deliverDiscordDirectMessageCompletion(params: {
   isActive?: boolean;
   queueEmbeddedAgentMessageWithOutcome?: QueueEmbeddedAgentMessageWithOutcome;
   sourceTool?: string;
+  runtimeConfig?: Record<string, unknown>;
 }) {
   const origin = {
     channel: "discord",
@@ -266,7 +267,7 @@ async function deliverDiscordDirectMessageCompletion(params: {
       sessionId: "requester-session-dm",
       isActive: params.isActive === true,
     }),
-    getRuntimeConfig: () => ({}) as never,
+    getRuntimeConfig: () => (params.runtimeConfig ?? {}) as never,
     sendMessage: params.sendMessage ?? runtimeSendMessage,
     ...(params.queueEmbeddedAgentMessageWithOutcome
       ? { queueEmbeddedAgentMessageWithOutcome: params.queueEmbeddedAgentMessageWithOutcome }
@@ -1274,7 +1275,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(queueEmbeddedAgentMessageWithOutcome).not.toHaveBeenCalled();
   });
 
-  it("directly delivers direct-message subagent text when the announce agent returns no visible output", async () => {
+  it("fails instead of raw-sending subagent text when a direct requester returns no visible output", async () => {
     const callGateway = createGatewayMock({
       result: {
         payloads: [],
@@ -1302,24 +1303,25 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     });
 
     expectRecordFields(result, {
-      delivered: true,
+      delivered: false,
       path: "direct",
+      reason: "visible_reply_missing",
+      error: "completion agent did not produce a visible reply",
     });
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "discord",
-        accountId: "acct-1",
-        to: "dm:U123",
-        content: "child completion output",
-        idempotencyKey: "announce-dm-fallback-empty:text-direct",
-      }),
-    );
+    expectGatewayAgentParams(callGateway, {
+      deliver: true,
+      channel: "discord",
+      accountId: "acct-1",
+      to: "dm:U123",
+      threadId: undefined,
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("directly delivers direct-message subagent text when the announce agent omits the result", async () => {
+  it("keeps the requester agent's natural automatic direct reply", async () => {
     const callGateway = createGatewayMock({
       result: {
-        payloads: [{ text: "TG88042_NO_REOUTPUT" }],
+        payloads: [{ text: "Done — I handled it." }],
       },
     });
     const sendMessage = createSendMessageMock();
@@ -1337,33 +1339,30 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
           taskLabel: "direct completion smoke",
           status: "ok",
           statusLabel: "completed successfully",
-          result: "TG88042_CHILD",
+          result: "raw child implementation details",
           replyInstruction: "Summarize the result.",
         },
       ],
+      runtimeConfig: {
+        messages: {
+          visibleReplies: "automatic",
+          groupChat: { visibleReplies: "message_tool" },
+        },
+      },
     });
 
     expectRecordFields(result, {
       delivered: true,
       path: "direct",
     });
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "discord",
-        accountId: "acct-1",
-        to: "dm:U123",
-        content: "TG88042_CHILD",
-        idempotencyKey: "announce-dm-fallback-empty:text-direct",
-      }),
-    );
     expectGatewayAgentParams(callGateway, {
-      deliver: false,
+      deliver: true,
       channel: "discord",
       accountId: "acct-1",
       to: "dm:U123",
       threadId: undefined,
-      sourceReplyDeliveryMode: "message_tool_only",
     });
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("does not directly deliver failed subagent placeholder output", async () => {
@@ -1402,7 +1401,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("directly delivers unprefixed direct targets recognized by the channel grammar", async () => {
+  it("fails without raw-sending an unprefixed target whose canonical session key is direct", async () => {
     registerDirectTargetTestChannel("qa-channel");
     const callGateway = createGatewayMock({
       result: {
@@ -1418,7 +1417,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       isActive: false,
       expectsCompletionMessage: true,
       directIdempotencyKey: "announce-qa-fallback-empty",
-      requesterSessionKey: "agent:qa:subagent-direct-fallback:1234",
+      requesterSessionKey: "agent:qa:qa-channel:direct:operator",
       requesterOrigin: {
         channel: "qa-channel",
         to: "qa-operator",
@@ -1441,18 +1440,12 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     });
 
     expectRecordFields(result, {
-      delivered: true,
+      delivered: false,
       path: "direct",
+      reason: "visible_reply_missing",
+      error: "completion agent did not produce a visible reply",
     });
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "qa-channel",
-        accountId: "default",
-        to: "qa-operator",
-        content: "child completion output",
-        idempotencyKey: "announce-qa-fallback-empty:text-direct",
-      }),
-    );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("does not raw-send channel completions just because the requester key is direct", async () => {
@@ -1500,7 +1493,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("directly delivers direct-message subagent text when the announce agent returns incomplete", async () => {
+  it("fails instead of raw-sending subagent text when the direct requester returns incomplete", async () => {
     const callGateway = vi.fn(async () => {
       throw new Error(
         "FailoverError: mock-openai/gpt-5.5 ended with an incomplete terminal response: code=incomplete_result",
@@ -1528,18 +1521,12 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     });
 
     expectRecordFields(result, {
-      delivered: true,
+      delivered: false,
       path: "direct",
+      error:
+        "FailoverError: mock-openai/gpt-5.5 ended with an incomplete terminal response: code=incomplete_result",
     });
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "discord",
-        accountId: "acct-1",
-        to: "dm:U123",
-        content: "child completion output",
-        idempotencyKey: "announce-dm-fallback-empty:text-direct",
-      }),
-    );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("uses in-process agent dispatch for dormant completion requesters", async () => {
@@ -4982,12 +4969,10 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("requires message-tool delivery for direct subagent completions", async () => {
+  it("uses automatic requester-agent delivery for direct subagent completions", async () => {
     const callGateway = createGatewayMock({
       result: {
         payloads: [{ text: "The subagent is done: child completion output" }],
-        didSendViaMessagingTool: true,
-        messagingToolSentTexts: ["The subagent is done: child completion output"],
       },
     });
     const sendMessage = createSendMessageMock();
@@ -4995,6 +4980,12 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       callGateway,
       sendMessage,
       sourceTool: "subagent_announce",
+      runtimeConfig: {
+        messages: {
+          visibleReplies: "automatic",
+          groupChat: { visibleReplies: "message_tool" },
+        },
+      },
       internalEvents: [
         {
           type: "task_completion",
@@ -5016,33 +5007,30 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       path: "direct",
     });
     expectGatewayAgentParams(callGateway, {
-      deliver: false,
+      deliver: true,
       channel: "discord",
       accountId: "acct-1",
       to: "dm:U123",
       threadId: undefined,
-      sourceReplyDeliveryMode: "message_tool_only",
     });
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("retries active direct subagent completion wake without forced message-tool mode", async () => {
-    const callGateway = createGatewayMock({
-      result: {
-        payloads: [{ text: "The subagent is done: child completion output" }],
-        didSendViaMessagingTool: true,
-      },
-    });
-    const queueEmbeddedAgentMessageWithOutcome = createQueueOutcomeSequenceMock([
-      "source_reply_delivery_mode_mismatch",
-      true,
-    ]);
+  it("wakes an active direct requester without forcing message-tool mode", async () => {
+    const callGateway = createGatewayMock();
+    const queueEmbeddedAgentMessageWithOutcome = createQueueOutcomeMock(true);
 
     const result = await deliverDiscordDirectMessageCompletion({
       callGateway,
       isActive: true,
       queueEmbeddedAgentMessageWithOutcome,
       sourceTool: "subagent_announce",
+      runtimeConfig: {
+        messages: {
+          visibleReplies: "automatic",
+          groupChat: { visibleReplies: "message_tool" },
+        },
+      },
       internalEvents: [
         {
           type: "task_completion",
@@ -5063,17 +5051,13 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       delivered: true,
       path: "steered",
     });
-    expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledTimes(2);
-    expectRecordFields(mockCallArg(queueEmbeddedAgentMessageWithOutcome, 0, 2), {
-      sourceReplyDeliveryMode: "message_tool_only",
-      waitForTranscriptCommit: true,
-    });
-    const retryOptions = mockCallArg(queueEmbeddedAgentMessageWithOutcome, 1, 2);
-    expectRecordFields(retryOptions, {
+    expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledTimes(1);
+    const wakeOptions = mockCallArg(queueEmbeddedAgentMessageWithOutcome, 0, 2);
+    expectRecordFields(wakeOptions, {
       waitForTranscriptCommit: true,
     });
     expect(
-      (retryOptions as { sourceReplyDeliveryMode?: unknown }).sourceReplyDeliveryMode,
+      (wakeOptions as { sourceReplyDeliveryMode?: unknown }).sourceReplyDeliveryMode,
     ).toBeUndefined();
     expect(callGateway).not.toHaveBeenCalled();
   });

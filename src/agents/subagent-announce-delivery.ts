@@ -9,7 +9,10 @@ import {
   normalizeStringEntries,
   uniqueStrings,
 } from "@openclaw/normalization-core/string-normalization";
-import { completionRequiresMessageToolDelivery } from "../auto-reply/reply/completion-delivery-policy.js";
+import {
+  completionRequiresMessageToolDelivery,
+  resolveCompletionChatType,
+} from "../auto-reply/reply/completion-delivery-policy.js";
 import { isSilentReplyPayloadText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { getLoadedChannelPluginForRead } from "../channels/plugins/registry-loaded-read.js";
 import type { ChannelId } from "../channels/plugins/types.public.js";
@@ -25,7 +28,6 @@ import {
   isAgentMediatedCompletionSourceTool,
   shouldPreserveUserFacingSessionStateForInputProvenance,
 } from "../sessions/input-provenance.js";
-import { deriveSessionChatTypeFromKey } from "../sessions/session-chat-type-shared.js";
 import { isCronRunSessionKey, isCronSessionKey } from "../sessions/session-key-utils.js";
 import { isNonTerminalAgentRunStatus } from "../shared/agent-run-status.js";
 import { mergeDeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
@@ -471,11 +473,6 @@ function isPermanentAnnounceDeliveryError(error: unknown): boolean {
     (message && PERMANENT_ANNOUNCE_DELIVERY_ERROR_PATTERNS.some((re) => re.test(message))) ||
     hasSessionFileChangedAnnounceError(error)
   );
-}
-
-function isIncompleteAnnounceAgentResultError(error: unknown): boolean {
-  const message = summarizeDeliveryError(error);
-  return /(?:incomplete terminal response|code=incomplete_result)\b/i.test(message);
 }
 
 function isSessionWriteLockAnnounceAgentError(error: unknown): boolean {
@@ -965,68 +962,6 @@ async function deliverGeneratedMediaCompletionDirect(params: {
   }
 }
 
-function inferDeliveryTargetChatType(target: {
-  channel?: string;
-  to?: string;
-}): "direct" | "group" | "channel" | undefined {
-  const normalizedTo = normalizeOptionalLowercaseString(target.to);
-  if (!normalizedTo) {
-    return undefined;
-  }
-  if (
-    normalizedTo.startsWith("dm:") ||
-    normalizedTo.startsWith("direct:") ||
-    normalizedTo.startsWith("user:") ||
-    normalizedTo.includes(":dm:") ||
-    normalizedTo.includes(":direct:")
-  ) {
-    return "direct";
-  }
-  if (normalizedTo.startsWith("channel:") || normalizedTo.startsWith("thread:")) {
-    return "channel";
-  }
-  if (normalizedTo.startsWith("group:")) {
-    return "group";
-  }
-  const channel = normalizeMessageChannel(target.channel);
-  return channel
-    ? getLoadedChannelPluginForRead(channel as ChannelId)?.messaging?.inferTargetChatType?.({
-        to: target.to ?? "",
-      })
-    : undefined;
-}
-
-function isDirectMessageDeliveryTarget(
-  target: { channel?: string; to?: string; threadId?: string },
-  requesterSessionKey: string,
-): boolean {
-  if (target.threadId) {
-    return false;
-  }
-  const targetChatType = inferDeliveryTargetChatType(target);
-  if (targetChatType) {
-    return targetChatType === "direct";
-  }
-  return deriveSessionChatTypeFromKey(requesterSessionKey) === "direct";
-}
-
-function resolveTextCompletionDirectFallback(events: readonly AgentInternalEvent[] | undefined) {
-  for (let index = (events?.length ?? 0) - 1; index >= 0; index -= 1) {
-    const event = events?.[index];
-    if (event?.type !== "task_completion" || event.source !== "subagent") {
-      continue;
-    }
-    if (event.status !== "ok") {
-      continue;
-    }
-    const result = typeof event.result === "string" ? event.result.trim() : "";
-    if (result && result !== "(no output)") {
-      return result;
-    }
-  }
-  return undefined;
-}
-
 function hasFailedSubagentNoOutputCompletion(events: readonly AgentInternalEvent[] | undefined) {
   return (
     events?.some(
@@ -1037,61 +972,6 @@ function hasFailedSubagentNoOutputCompletion(events: readonly AgentInternalEvent
         event.result.trim() === "(no output)",
     ) === true
   );
-}
-
-async function deliverTextCompletionDirect(params: {
-  cfg: OpenClawConfig;
-  requesterSessionKey: string;
-  directIdempotencyKey: string;
-  deliveryTarget: {
-    deliver: boolean;
-    channel?: string;
-    to?: string;
-    accountId?: string;
-    threadId?: string;
-  };
-  internalEvents?: readonly AgentInternalEvent[];
-}): Promise<SubagentAnnounceDeliveryResult | undefined> {
-  const content = resolveTextCompletionDirectFallback(params.internalEvents);
-  if (
-    !content ||
-    !params.deliveryTarget.deliver ||
-    !params.deliveryTarget.channel ||
-    !params.deliveryTarget.to ||
-    !isDirectMessageDeliveryTarget(params.deliveryTarget, params.requesterSessionKey)
-  ) {
-    return undefined;
-  }
-  const agentId = resolveAgentIdFromSessionKey(params.requesterSessionKey);
-  const idempotencyKey = `${params.directIdempotencyKey}:text-direct`;
-  try {
-    await subagentAnnounceDeliveryDeps.sendMessage({
-      cfg: params.cfg,
-      channel: params.deliveryTarget.channel,
-      to: params.deliveryTarget.to,
-      accountId: params.deliveryTarget.accountId,
-      threadId: params.deliveryTarget.threadId,
-      requesterSessionKey: params.requesterSessionKey,
-      agentId,
-      content,
-      idempotencyKey,
-      mirror: {
-        sessionKey: params.requesterSessionKey,
-        agentId,
-        idempotencyKey,
-      },
-    });
-    return {
-      delivered: true,
-      path: "direct",
-    };
-  } catch (err) {
-    return {
-      delivered: false,
-      path: "direct",
-      error: `text completion direct delivery failed: ${summarizeDeliveryError(err)}`,
-    };
-  }
 }
 
 function resolveGeneratedMediaDirectFallbackUrls(params: {
@@ -1375,6 +1255,18 @@ async function sendSubagentAnnounceDirectly(params: {
       ? effectiveDirectOrigin
       : requesterSessionOrigin;
     const requesterEntry = loadRequesterSessionEntry(params.targetRequesterSessionKey).entry;
+    const deliveryTargetChatType = resolveCompletionChatType({
+      directOrigin: effectiveDirectOrigin,
+      requesterSessionOrigin,
+    });
+    const completionChatType =
+      deliveryTargetChatType === "unknown"
+        ? resolveCompletionChatType({
+            requesterSessionKey: params.requesterSessionKey,
+            targetRequesterSessionKey: canonicalRequesterSessionKey,
+            requesterEntry,
+          })
+        : deliveryTargetChatType;
     const externalTextDeliveryAvailable =
       !params.requesterIsSubagent &&
       hasLoadedExternalTextDeliveryAdapter(effectiveDirectOrigin?.channel);
@@ -1414,14 +1306,7 @@ async function sendSubagentAnnounceDirectly(params: {
         requesterSessionOrigin,
         messageToolAvailable: externalTextDeliveryAvailable,
       });
-    const subagentDirectMessageCompletionRequiresMessageTool =
-      params.expectsCompletionMessage &&
-      isSubagentCompletion &&
-      deliveryTarget.deliver &&
-      isDirectMessageDeliveryTarget(deliveryTarget, canonicalRequesterSessionKey);
-    const requiresMessageToolDelivery =
-      completionRouteRequiresMessageToolDelivery ||
-      subagentDirectMessageCompletionRequiresMessageTool;
+    const requiresMessageToolDelivery = completionRouteRequiresMessageToolDelivery;
     const requesterActivity = resolveRequesterSessionActivity(canonicalRequesterSessionKey);
     if (
       params.expectsCompletionMessage &&
@@ -1598,23 +1483,6 @@ async function sendSubagentAnnounceDirectly(params: {
         throw err;
       }
       if (
-        params.expectsCompletionMessage &&
-        (shouldDeliverAgentFinal || subagentDirectMessageCompletionRequiresMessageTool) &&
-        isSubagentCompletion &&
-        isIncompleteAnnounceAgentResultError(err)
-      ) {
-        const textDelivery = await deliverTextCompletionDirect({
-          cfg,
-          requesterSessionKey: canonicalRequesterSessionKey,
-          directIdempotencyKey: params.directIdempotencyKey,
-          deliveryTarget,
-          internalEvents: params.internalEvents,
-        });
-        if (textDelivery) {
-          return textDelivery;
-        }
-      }
-      if (
         activeRequesterWakeFailed &&
         agentMediatedCompletion &&
         expectedMediaUrls.length > 0 &&
@@ -1683,28 +1551,17 @@ async function sendSubagentAnnounceDirectly(params: {
       params.expectsCompletionMessage &&
       shouldDeliverAgentFinal &&
       isSubagentCompletion &&
+      completionChatType === "direct" &&
       !hasVisibleGatewayAgentPayload(directAnnounceResponse) &&
       !hasGatewayAgentMessagingToolDeliveryEvidence(directAnnounceResponse) &&
       !hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse)
     ) {
-      const textDelivery = await deliverTextCompletionDirect({
-        cfg,
-        requesterSessionKey: canonicalRequesterSessionKey,
-        directIdempotencyKey: params.directIdempotencyKey,
-        deliveryTarget,
-        internalEvents: params.internalEvents,
-      });
-      if (textDelivery) {
-        return textDelivery;
-      }
-      if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
-        return {
-          delivered: false,
-          path: "direct",
-          reason: "visible_reply_missing",
-          error: "completion agent did not produce a visible reply",
-        };
-      }
+      return {
+        delivered: false,
+        path: "direct",
+        reason: "visible_reply_missing",
+        error: "completion agent did not produce a visible reply",
+      };
     }
     if (
       params.expectsCompletionMessage &&
@@ -1719,18 +1576,6 @@ async function sendSubagentAnnounceDirectly(params: {
           reason: "visible_reply_missing",
           error: "completion agent did not produce a visible reply",
         };
-      }
-      if (subagentDirectMessageCompletionRequiresMessageTool) {
-        const textDelivery = await deliverTextCompletionDirect({
-          cfg,
-          requesterSessionKey: canonicalRequesterSessionKey,
-          directIdempotencyKey: params.directIdempotencyKey,
-          deliveryTarget,
-          internalEvents: params.internalEvents,
-        });
-        if (textDelivery) {
-          return textDelivery;
-        }
       }
       return {
         delivered: false,
