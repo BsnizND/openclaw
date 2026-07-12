@@ -14,6 +14,7 @@ export type CachedPluginToolDescriptor = {
   descriptor: ToolDescriptor;
   displaySummary?: string;
   optional: boolean;
+  timeoutMs?: number;
 };
 
 const descriptorCache = new Map<string, CachedPluginToolDescriptor[]>();
@@ -149,12 +150,14 @@ export function capturePluginToolDescriptor(params: {
   pluginId: string;
   tool: AnyAgentTool;
   optional: boolean;
+  timeoutMs?: number;
 }): CachedPluginToolDescriptor {
   const label = (params.tool as { label?: unknown }).label;
   const title = typeof label === "string" && label.trim() ? label.trim() : undefined;
   return {
     ...(params.tool.displaySummary ? { displaySummary: params.tool.displaySummary } : {}),
     optional: params.optional,
+    ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
     descriptor: {
       name: params.tool.name,
       ...(title ? { title } : {}),

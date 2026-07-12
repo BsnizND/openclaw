@@ -11,6 +11,7 @@ import {
   resolveCodexAppServerRuntimeOptions,
 } from "./src/app-server/config.js";
 import type { CodexPluginConfig } from "./src/app-server/config.js";
+import { resolveDynamicToolCallTimeoutMs } from "./src/app-server/dynamic-tool-execution.js";
 import { filterCodexDynamicTools } from "./src/app-server/dynamic-tool-profile.js";
 import { createCodexDynamicToolBridge } from "./src/app-server/dynamic-tools.js";
 import type { CodexDynamicToolSpec, JsonObject } from "./src/app-server/protocol.js";
@@ -101,4 +102,27 @@ export function createCodexDynamicToolSpecsForPromptSnapshot(params: {
     loading: params.pluginConfig?.codexDynamicToolsLoading ?? "searchable",
     directToolNames: params.directToolNames,
   }).specs;
+}
+
+/** Resolves the effective Codex watchdog for one already-built OpenClaw tool. */
+export function resolveCodexDynamicToolTimeoutForTest(params: {
+  tools: AnyAgentTool[];
+  toolName: string;
+}): number {
+  const bridge = createCodexDynamicToolBridge({
+    tools: params.tools,
+    signal: new AbortController().signal,
+  });
+  return resolveDynamicToolCallTimeoutMs({
+    call: {
+      threadId: "test-thread",
+      turnId: "test-turn",
+      callId: "test-call",
+      namespace: null,
+      tool: params.toolName,
+      arguments: {},
+    },
+    config: undefined,
+    registeredTimeoutMs: bridge.getRegisteredTimeoutMs(params.toolName),
+  });
 }

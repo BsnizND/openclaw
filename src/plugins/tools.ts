@@ -756,6 +756,9 @@ function createCachedDescriptorPluginTool(params: {
   setPluginToolMeta(tool, {
     pluginId,
     optional: params.descriptor.optional,
+    ...(params.descriptor.timeoutMs !== undefined
+      ? { timeoutMs: params.descriptor.timeoutMs }
+      : {}),
     replaySafe: isManifestToolReplaySafe({
       manifestPlugin: params.plugin,
       toolName,
@@ -1403,6 +1406,7 @@ export function resolvePluginTools(params: {
             pluginId: entry.pluginId,
             tool,
             optional,
+            timeoutMs: entry.timeoutMs,
           }),
         );
         capturedDescriptorsByPluginId.set(entry.pluginId, capturedDescriptors);

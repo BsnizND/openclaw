@@ -1804,10 +1804,14 @@ describe("resolvePluginTools optional tools", () => {
       },
     ]);
 
-    const tools = resolvePluginTools(createResolveToolsParams());
+    const first = resolvePluginTools(createResolveToolsParams());
+    const cached = resolvePluginTools(createResolveToolsParams());
 
-    expectResolvedToolNames(tools, ["long_workflow"]);
-    expect(getPluginToolMeta(tools[0])?.timeoutMs).toBe(240_000);
+    expectResolvedToolNames(first, ["long_workflow"]);
+    expectResolvedToolNames(cached, ["long_workflow"]);
+    expect(getPluginToolMeta(first[0])?.timeoutMs).toBe(240_000);
+    expect(getPluginToolMeta(cached[0])?.timeoutMs).toBe(240_000);
+    expect(factory).toHaveBeenCalledOnce();
   });
 
   it("rejects plugin id collisions with core tool names", () => {
