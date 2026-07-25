@@ -79,10 +79,10 @@ function optionalString(record: JsonRecord, key: string): string | undefined {
   return value || undefined;
 }
 
-function requiredFiniteNumber(record: JsonRecord, key: string): number {
+function requiredNonNegativeFiniteNumber(record: JsonRecord, key: string): number {
   const value = record[key];
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`wiki batch requires finite numeric ${key}.`);
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`wiki batch requires non-negative finite numeric ${key}.`);
   }
   return value;
 }
@@ -163,7 +163,7 @@ function normalizeEvidence(value: unknown): IngestMemoryWikiEvidence | undefined
     kind: requiredString(value, "kind"),
     origin: requiredString(value, "origin"),
     directness: requiredString(value, "directness"),
-    weight: requiredFiniteNumber(value, "weight"),
+    weight: requiredNonNegativeFiniteNumber(value, "weight"),
   };
 }
 

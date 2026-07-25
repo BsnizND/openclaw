@@ -248,6 +248,41 @@ describe("memory-wiki batch operations", () => {
     await expect(fs.stat(path.join(rootDir, "sources", "valid.md"))).rejects.toThrow();
   });
 
+  it("rejects negative evidence weight during preflight", async () => {
+    const tempDir = await createTempDir("memory-wiki-batch-evidence-");
+    const sourcePath = path.join(tempDir, "source.txt");
+    const applyPath = path.join(tempDir, "apply.json");
+    await fs.writeFile(sourcePath, "source\n", "utf8");
+    const { rootDir, config } = await createVault({
+      rootDir: path.join(tempDir, "vault"),
+      initialize: true,
+    });
+    await writeJson(applyPath, {
+      version: 1,
+      operations: [
+        {
+          id: "source",
+          kind: "ingest-source",
+          inputPath: sourcePath,
+          title: "Source",
+          evidence: {
+            sourceType: "evidence-primary-document",
+            type: "primary_document",
+            kind: "primary_document",
+            origin: "test-fixture",
+            directness: "primary",
+            weight: -1,
+          },
+        },
+      ],
+    });
+
+    await expect(runMemoryWikiApplyBatch({ config, inputPath: applyPath })).rejects.toThrow(
+      "non-negative finite numeric weight",
+    );
+    await expect(fs.stat(path.join(rootDir, "sources", "source.md"))).rejects.toThrow();
+  });
+
   it.each([
     {
       name: "source",
