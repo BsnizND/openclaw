@@ -150,6 +150,50 @@ describe("memory-wiki batch operations", () => {
     );
   });
 
+  it("matches exact paths case-sensitively", async () => {
+    const tempDir = await createTempDir("memory-wiki-search-path-case-");
+    const sourcePath = path.join(tempDir, "alpha.txt");
+    const applyPath = path.join(tempDir, "apply.json");
+    const searchPath = path.join(tempDir, "search.json");
+    await fs.writeFile(sourcePath, "Alpha source evidence.\n", "utf8");
+    const { config } = await createVault({
+      rootDir: path.join(tempDir, "vault"),
+      initialize: true,
+    });
+    await writeJson(applyPath, {
+      version: 1,
+      operations: [
+        {
+          id: "source",
+          kind: "ingest-source",
+          inputPath: sourcePath,
+          title: "Alpha Reference",
+        },
+      ],
+    });
+    await runMemoryWikiApplyBatch({ config, inputPath: applyPath });
+    await writeJson(searchPath, {
+      version: 1,
+      queries: [
+        {
+          id: "wrong-case",
+          query: "Alpha Reference",
+          expectedPaths: ["sources/ALPHA-reference.md"],
+          expectedPageTypes: ["source"],
+          required: false,
+        },
+      ],
+    });
+
+    const result = await runMemoryWikiSearchBatch({ config, inputPath: searchPath });
+    expect(result.results[0]).toMatchObject({
+      id: "wrong-case",
+      ok: false,
+      matchedPath: null,
+      resultCount: 1,
+    });
+  });
+
   it("reports a missing optional target without aborting the batch", async () => {
     const tempDir = await createTempDir("memory-wiki-search-optional-");
     const searchPath = path.join(tempDir, "search.json");

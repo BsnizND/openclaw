@@ -461,13 +461,12 @@ export async function runMemoryWikiSearchBatch(params: {
   const results = queries.map((query) => {
     const item = byId.get(query.id);
     const hits = item?.results ?? [];
-    const expectedPaths = new Set(query.expectedPaths.map((value) => value.toLowerCase()));
+    const expectedPaths = new Set(query.expectedPaths);
     const expectedIds = new Set(query.expectedIds.map((value) => value.toLowerCase()));
     const expectedPageTypes = new Set(query.expectedPageTypes.map((value) => value.toLowerCase()));
     const match = hits.find((hit) => {
       const targetMatches =
-        expectedPaths.has(hit.path.toLowerCase()) ||
-        Boolean(hit.id && expectedIds.has(hit.id.toLowerCase()));
+        expectedPaths.has(hit.path) || Boolean(hit.id && expectedIds.has(hit.id.toLowerCase()));
       const pageTypeMatches =
         expectedPageTypes.size === 0 || expectedPageTypes.has(hit.kind.toLowerCase());
       return targetMatches && pageTypeMatches;
