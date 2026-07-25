@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import { describe, expect, it, vi } from "vitest";
-import { ingestMemoryWikiSource } from "./ingest.js";
+import { ingestMemoryWikiSource, ingestMemoryWikiSourceBatchOperation } from "./ingest.js";
 import { withMemoryWikiVaultMutation } from "./mutation-coordinator.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
 
@@ -159,11 +159,15 @@ hello from source
     const rootDir = await createTempDir("memory-wiki-ingest-evidence-");
     const inputPath = path.join(rootDir, "source.txt");
     await fs.writeFile(inputPath, "source body\n", "utf8");
-    const { config } = await createVault({ rootDir: path.join(rootDir, "vault") });
+    const { config } = await createVault({
+      rootDir: path.join(rootDir, "vault"),
+      initialize: true,
+    });
 
-    await ingestMemoryWikiSource({
+    await ingestMemoryWikiSourceBatchOperation({
       config,
       inputPath,
+      sourceBuffer: await fs.readFile(inputPath),
       title: "Source",
       evidence: {
         sourceType: "evidence-primary-document",
