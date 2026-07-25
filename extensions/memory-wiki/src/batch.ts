@@ -8,9 +8,14 @@ import {
   ingestMemoryWikiSourceBatchOperation,
   type IngestMemoryWikiEvidence,
 } from "./ingest.js";
+import { slugifyWikiPageStem } from "./markdown.js";
 import { withMemoryWikiVaultMutation } from "./mutation-coordinator.js";
-import { searchMemoryWikiBatch, type WikiBatchSearchQuery } from "./query-batch.js";
-import { WIKI_SEARCH_MODES, type WikiSearchMode, type WikiSearchResult } from "./query.js";
+import {
+  boundedWikiBatchHit,
+  searchMemoryWikiBatch,
+  type WikiBatchSearchQuery,
+} from "./query-batch.js";
+import { WIKI_SEARCH_MODES, type WikiSearchMode } from "./query.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
 const BATCH_INPUT_MAX_BYTES = 256 * 1024;
@@ -21,7 +26,6 @@ const BATCH_MAX_OPERATIONS = 16;
 const BATCH_MAX_QUERIES = 6;
 const BATCH_MAX_RESULTS = 10;
 const BATCH_REPORT_HITS = 5;
-const BATCH_SNIPPET_MAX_CHARS = 500;
 const BATCH_UPDATED_FILES_MAX = 50;
 const BATCH_ERRORS_MAX = 20;
 const BATCH_PAGE_TYPES = new Set(["source", "synthesis", "entity", "concept", "report"]);
@@ -112,6 +116,14 @@ function expectedWikiPathList(record: JsonRecord): string[] {
   });
 }
 
+function registerTarget(targets: Set<string>, directory: string, title: string): void {
+  const target = `${directory}/${slugifyWikiPageStem(title)}.md`;
+  if (targets.has(target)) {
+    throw new Error(`wiki apply-batch operations target the same page: ${target}`);
+  }
+  targets.add(target);
+}
+
 function boundedInteger(value: unknown, fallback: number): number {
   if (value === undefined) {
     return fallback;
@@ -164,6 +176,7 @@ async function normalizeApplyOperations(input: JsonRecord): Promise<ApplyBatchOp
   }
   const ids = new Set<string>();
   const operations: ApplyBatchOperation[] = [];
+  const targets = new Set<string>();
   let sourceBytes = 0;
   for (const raw of input.operations) {
     if (!isRecord(raw)) {
@@ -176,6 +189,8 @@ async function normalizeApplyOperations(input: JsonRecord): Promise<ApplyBatchOp
     ids.add(id);
     const kind = requiredString(raw, "kind");
     if (kind === "ingest-source") {
+      const title = requiredString(raw, "title");
+      registerTarget(targets, "sources", title);
       const inputPath = path.resolve(requiredString(raw, "inputPath"));
       const sourceStat = await fs.stat(inputPath);
       if (!sourceStat.isFile()) {
@@ -200,7 +215,7 @@ async function normalizeApplyOperations(input: JsonRecord): Promise<ApplyBatchOp
         kind,
         inputPath,
         sourceBuffer,
-        title: requiredString(raw, "title"),
+        title,
         ...(raw.evidence !== undefined ? { evidence: normalizeEvidence(raw.evidence) } : {}),
       });
       continue;
@@ -208,6 +223,8 @@ async function normalizeApplyOperations(input: JsonRecord): Promise<ApplyBatchOp
     if (kind !== "upsert-synthesis") {
       throw new Error(`wiki apply-batch operation kind is unsupported: ${kind}`);
     }
+    const title = requiredString(raw, "title");
+    registerTarget(targets, "syntheses", title);
     const body = optionalString(raw, "body");
     const bodyFile = optionalString(raw, "bodyFile");
     if (Boolean(body) === Boolean(bodyFile)) {
@@ -247,7 +264,7 @@ async function normalizeApplyOperations(input: JsonRecord): Promise<ApplyBatchOp
     operations.push({
       id,
       kind,
-      title: requiredString(raw, "title"),
+      title,
       body: resolvedBody as string,
       sourceRefs,
       sourceIds,
@@ -422,20 +439,6 @@ function normalizeSearchQueries(input: JsonRecord): SearchBatchItem[] {
   });
 }
 
-function boundedHit(result: WikiSearchResult) {
-  return {
-    path: result.path,
-    ...(result.id ? { id: result.id } : {}),
-    title: result.title,
-    pageType: result.kind,
-    score: result.score,
-    snippet:
-      result.snippet.length > BATCH_SNIPPET_MAX_CHARS
-        ? `${result.snippet.slice(0, BATCH_SNIPPET_MAX_CHARS - 3)}...`
-        : result.snippet,
-  };
-}
-
 export async function runMemoryWikiSearchBatch(params: {
   config: ResolvedMemoryWikiConfig;
   inputPath: string;
@@ -478,7 +481,7 @@ export async function runMemoryWikiSearchBatch(params: {
       matchedId: match?.id ?? null,
       candidatePageCount: item?.candidatePageCount ?? 0,
       resultCount: hits.length,
-      hits: hits.slice(0, BATCH_REPORT_HITS).map(boundedHit),
+      hits: hits.slice(0, BATCH_REPORT_HITS).map(boundedWikiBatchHit),
     };
   });
   const failed = results.filter((result) => result.required && !result.ok);

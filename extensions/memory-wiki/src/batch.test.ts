@@ -203,4 +203,49 @@ describe("memory-wiki batch operations", () => {
     );
     await expect(fs.stat(path.join(rootDir, "sources", "valid.md"))).rejects.toThrow();
   });
+
+  it.each([
+    {
+      name: "source",
+      operations: (sourcePath: string) => [
+        { id: "first", kind: "ingest-source", inputPath: sourcePath, title: "Duplicate" },
+        { id: "second", kind: "ingest-source", inputPath: sourcePath, title: "duplicate" },
+      ],
+    },
+    {
+      name: "synthesis",
+      operations: (sourcePath: string) => [
+        { id: "source", kind: "ingest-source", inputPath: sourcePath, title: "Evidence" },
+        {
+          id: "first",
+          kind: "upsert-synthesis",
+          title: "Duplicate",
+          body: "first",
+          sourceRefs: ["source"],
+        },
+        {
+          id: "second",
+          kind: "upsert-synthesis",
+          title: "duplicate",
+          body: "second",
+          sourceRefs: ["source"],
+        },
+      ],
+    },
+  ])("rejects duplicate $name page targets during preflight", async ({ operations }) => {
+    const tempDir = await createTempDir("memory-wiki-batch-target-");
+    const sourcePath = path.join(tempDir, "source.txt");
+    const applyPath = path.join(tempDir, "apply.json");
+    await fs.writeFile(sourcePath, "source\n", "utf8");
+    const { rootDir, config } = await createVault({
+      rootDir: path.join(tempDir, "vault"),
+      initialize: true,
+    });
+    await writeJson(applyPath, { version: 1, operations: operations(sourcePath) });
+
+    await expect(runMemoryWikiApplyBatch({ config, inputPath: applyPath })).rejects.toThrow(
+      "target the same page",
+    );
+    await expect(fs.stat(path.join(rootDir, "sources", "evidence.md"))).rejects.toThrow();
+  });
 });

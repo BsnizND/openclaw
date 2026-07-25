@@ -16,6 +16,8 @@ import {
 } from "./query.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
+const BATCH_SNIPPET_MAX_CHARS = 500;
+
 async function existingWikiPaths(vaultPath: string, relativePaths: string[]): Promise<string[]> {
   const paths = await Promise.all(
     relativePaths.map(async (relativePath) => {
@@ -47,6 +49,20 @@ export type WikiBatchSearchResult = {
   candidatePageCount: number;
   results: WikiSearchResult[];
 };
+
+export function boundedWikiBatchHit(result: WikiSearchResult) {
+  return {
+    path: result.path,
+    ...(result.id ? { id: result.id } : {}),
+    title: result.title,
+    pageType: result.kind,
+    score: result.score,
+    snippet:
+      result.snippet.length > BATCH_SNIPPET_MAX_CHARS
+        ? `${result.snippet.slice(0, BATCH_SNIPPET_MAX_CHARS - 3)}...`
+        : result.snippet,
+  };
+}
 
 /**
  * Search several wiki-only queries from one prepared digest/page snapshot.
