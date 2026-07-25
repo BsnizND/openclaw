@@ -11,13 +11,14 @@ import {
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import type { OpenClawConfig } from "../api.js";
 import { applyMemoryWikiMutation } from "./apply.js";
+import { registerMemoryWikiBatchCli } from "./batch-cli.js";
 import {
   importChatGptConversations,
   rollbackChatGptImportRun,
   type ChatGptImportResult,
   type ChatGptRollbackResult,
 } from "./chatgpt-import.js";
-import { compileMemoryWikiVault } from "./compile.js";
+import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.js";
 import {
   resolveMemoryWikiAgentConfig,
   WIKI_SEARCH_BACKENDS,
@@ -65,13 +66,9 @@ const ANSI_ESCAPE_SEQUENCE_PATTERN = new RegExp(
 const TERMINAL_CONTROL_CHARACTER_PATTERN = new RegExp(String.raw`[\x00-\x1F\x7F-\x9F]+`, "g");
 const UNICODE_FORMAT_CONTROL_PATTERN = /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
 
-type WikiStatusCommandOptions = {
-  json?: boolean;
-};
+type WikiStatusCommandOptions = { json?: boolean };
 
-type WikiDoctorCommandOptions = {
-  json?: boolean;
-};
+type WikiDoctorCommandOptions = { json?: boolean };
 
 type WikiInitCommandOptions = {
   json?: boolean;
@@ -385,7 +382,9 @@ async function resolveWikiApplyBody(params: { body?: string; bodyFile?: string }
   throw new Error("wiki apply synthesis requires --body or --body-file.");
 }
 
-type MemoryWikiMutationResult = Awaited<ReturnType<typeof applyMemoryWikiMutation>>;
+type MemoryWikiMutationResult = Awaited<ReturnType<typeof applyMemoryWikiMutation>> & {
+  compile: CompileMemoryWikiResult;
+};
 
 function formatMemoryWikiMutationSummary(result: MemoryWikiMutationResult, json?: boolean): string {
   if (json) {
@@ -1049,6 +1048,7 @@ export function registerWikiCli(program: Command, registration: MemoryWikiCliReg
       await runWikiIngest({ config, inputPath, title: opts.title, json: opts.json });
     });
 
+  registerMemoryWikiBatchCli(wiki, () => requireCommandContext().config);
   const okf = wiki.command("okf").description("Import Open Knowledge Format bundles");
   okf
     .command("import")

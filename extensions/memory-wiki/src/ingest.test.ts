@@ -127,4 +127,58 @@ hello from source
       await Promise.allSettled([holder, ...(ingest ? [ingest] : [])]);
     }
   });
+
+  it("does not rewrite or compile an unchanged source page", async () => {
+    const rootDir = await createTempDir("memory-wiki-ingest-noop-");
+    const inputPath = path.join(rootDir, "stable.txt");
+    await fs.writeFile(inputPath, "stable source\n", "utf8");
+    const { config } = await createVault({ rootDir: path.join(rootDir, "vault") });
+
+    const first = await ingestMemoryWikiSource({
+      config,
+      inputPath,
+      title: "Stable Reference",
+      nowMs: Date.UTC(2026, 3, 5, 12, 0, 0),
+    });
+    const pagePath = path.join(config.vault.path, first.pagePath);
+    const before = await fs.readFile(pagePath, "utf8");
+    const second = await ingestMemoryWikiSource({
+      config,
+      inputPath,
+      title: "Stable Reference",
+      nowMs: Date.UTC(2026, 3, 6, 12, 0, 0),
+    });
+
+    expect(first.changed).toBe(true);
+    expect(second.changed).toBe(false);
+    expect(second.indexUpdatedFiles).toEqual([]);
+    await expect(fs.readFile(pagePath, "utf8")).resolves.toBe(before);
+  });
+
+  it("clears stale evidence fields when regular ingest replaces an evidenced source", async () => {
+    const rootDir = await createTempDir("memory-wiki-ingest-evidence-");
+    const inputPath = path.join(rootDir, "source.txt");
+    await fs.writeFile(inputPath, "source body\n", "utf8");
+    const { config } = await createVault({ rootDir: path.join(rootDir, "vault") });
+
+    await ingestMemoryWikiSource({
+      config,
+      inputPath,
+      title: "Source",
+      evidence: {
+        sourceType: "evidence-primary-document",
+        type: "primary_document",
+        kind: "primary_document",
+        origin: "test-fixture",
+        directness: "primary",
+        weight: 1,
+      },
+    });
+    const replaced = await ingestMemoryWikiSource({ config, inputPath, title: "Source" });
+    const page = await fs.readFile(path.join(config.vault.path, replaced.pagePath), "utf8");
+
+    expect(page).toContain("sourceType: local-file");
+    expect(page).not.toContain("evidenceType:");
+    expect(page).not.toContain("evidenceOrigin:");
+  });
 });
