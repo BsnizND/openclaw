@@ -5,7 +5,7 @@ import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import {
   assertMemoryWikiSourceBuffer,
-  ingestMemoryWikiSource,
+  ingestMemoryWikiSourceBatchOperation,
   type IngestMemoryWikiEvidence,
 } from "./ingest.js";
 import { withMemoryWikiVaultMutation } from "./mutation-coordinator.js";
@@ -309,15 +309,13 @@ export async function runMemoryWikiApplyBatch(params: {
     let changed = false;
     for (const operation of operations) {
       if (operation.kind === "ingest-source") {
-        const result = await ingestMemoryWikiSource({
+        const result = await ingestMemoryWikiSourceBatchOperation({
           config: params.config,
           inputPath: operation.inputPath,
           sourceBuffer: operation.sourceBuffer,
           title: operation.title,
           evidence: operation.evidence,
-          compile: false,
           dryRun: params.dryRun,
-          initialize: false,
         });
         sourceIdsByRef.set(operation.id, result.pageId);
         changed ||= result.changed;

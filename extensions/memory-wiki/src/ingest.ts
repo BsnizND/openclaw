@@ -225,6 +225,23 @@ async function ingestMemoryWikiSourceUnlocked(params: {
   };
 }
 
+export async function ingestMemoryWikiSourceBatchOperation(params: {
+  config: ResolvedMemoryWikiConfig;
+  inputPath: string;
+  sourceBuffer: Buffer;
+  title: string;
+  dryRun?: boolean;
+  evidence?: IngestMemoryWikiEvidence;
+}): Promise<IngestMemoryWikiSourceResult> {
+  return await withMemoryWikiVaultMutation(params.config.vault.path, () =>
+    ingestMemoryWikiSourceUnlocked({
+      ...params,
+      compile: false,
+      initialize: false,
+    }),
+  );
+}
+
 export async function ingestMemoryWikiSource(params: {
   config: ResolvedMemoryWikiConfig;
   inputPath: string;
