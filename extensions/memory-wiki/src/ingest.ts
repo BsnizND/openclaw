@@ -20,7 +20,7 @@ import { withMemoryWikiVaultMutation } from "./mutation-coordinator.js";
 import { resolveMemoryWikiTimestamp } from "./time.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
-export type IngestMemoryWikiSourceResult = {
+type IngestMemoryWikiSourceResult = {
   sourcePath: string;
   pageId: string;
   pagePath: string;

@@ -2215,6 +2215,8 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: wiki search &lt;query&gt;
   - H3: wiki get &lt;lookup&gt;
   - H3: wiki apply
+  - H3: wiki apply-batch
+  - H3: wiki search-batch
   - H3: wiki bridge import
   - H3: wiki unsafe-local import
   - H3: wiki chatgpt import

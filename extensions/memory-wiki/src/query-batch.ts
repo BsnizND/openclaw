@@ -43,7 +43,7 @@ export type WikiBatchSearchQuery = {
   expectedIds?: string[];
 };
 
-export type WikiBatchSearchResult = {
+type WikiBatchSearchResult = {
   id: string;
   query: string;
   candidatePageCount: number;

@@ -106,10 +106,10 @@ export const WIKI_SEARCH_MODES = [
 
 export type WikiSearchMode = (typeof WIKI_SEARCH_MODES)[number];
 
-export type QueryDigestPage = MemoryWikiCompiledDigestPage;
-export type QueryDigestClaim = MemoryWikiCompiledClaim;
+type QueryDigestPage = MemoryWikiCompiledDigestPage;
+type QueryDigestClaim = MemoryWikiCompiledClaim;
 
-export type QueryDigestBundle = {
+type QueryDigestBundle = {
   pages: QueryDigestPage[];
   claims: QueryDigestClaim[];
 };

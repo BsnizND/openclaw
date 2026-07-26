@@ -59,7 +59,7 @@ type ApplyMemoryWikiMutation = CreateSynthesisMemoryWikiMutation | UpdateMetadat
 
 type MemoryWikiMutationInputOp = ApplyMemoryWikiMutation["op"] | "synthesis" | "metadata";
 
-export type ApplyMemoryWikiMutationResult = {
+type ApplyMemoryWikiMutationResult = {
   changed: boolean;
   operation: ApplyMemoryWikiMutation["op"];
   pagePath: string;
