@@ -501,6 +501,30 @@ describe("codex plugin", () => {
       await expect(bindingStore.read(identity)).resolves.toBeUndefined();
     }
 
+    // SQLite-native idle/daily resets append a reset marker without rotating the
+    // physical session id. The still-current Codex binding must remain usable.
+    const sameGeneration = sessionBindingIdentity({
+      agentId: "worker",
+      sessionId: "same-generation",
+      sessionKey: "agent:worker:same-generation",
+    });
+    await bindingStore.mutate(sameGeneration, {
+      kind: "set",
+      binding: { threadId: "thread-same-generation", cwd: "/repo" },
+    });
+    await sessionEnd(
+      {
+        sessionId: "same-generation",
+        sessionKey: "agent:worker:same-generation",
+        reason: "idle",
+        nextSessionId: "same-generation",
+      },
+      { agentId: "worker", sessionId: "same-generation" },
+    );
+    await expect(bindingStore.read(sameGeneration)).resolves.toMatchObject({
+      threadId: "thread-same-generation",
+    });
+
     // Cross-key handoff (e.g. dashboard "New Chat"/fork): the parent's still-live
     // binding must survive because the successor lives under a different key and
     // owns its own Codex thread. Use a fresh parent key (session-1 above is now

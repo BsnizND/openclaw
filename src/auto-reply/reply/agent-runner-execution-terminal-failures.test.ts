@@ -678,7 +678,7 @@ describe("runAgentTurnWithFallback: terminal failures", () => {
     }
     expect(result.payload.text).not.toBe(SILENT_REPLY_TOKEN);
     expect(result.payload.text).toBe(
-      "⚠️ This Codex session changed before your message could run. Please send it again.",
+      "I received your message, but this conversation restarted before I could process it. Your message is preserved; I couldn't complete the request.",
     );
     expect(result.payload.text).not.toContain("secret-session-id");
   });

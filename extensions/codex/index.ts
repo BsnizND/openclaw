@@ -299,13 +299,16 @@ export default definePluginEntry({
       // key; that child owns its own Codex thread binding (a Codex fork is a new
       // thread, not a transfer of the parent's). Retiring the parent's still-live
       // binding here would strand it, so skip when the successor provably lives
-      // under a different session key. The only cross-key emitter (gateway child
-      // creation) keeps the parent row live; same-key rollovers omit or repeat
-      // the key and still retire, as do unknown-current-key ends (no provable
-      // handoff) and later idle/daily/deleted ends. See #106778.
+      // under a different session key. SQLite-native idle/daily resets can also
+      // emit session_end while keeping the same physical session id; that is a
+      // logical transcript reset, not a Codex binding generation replacement.
       const endedSessionKey = sessionKey?.trim();
       const nextSessionKey = event.nextSessionKey?.trim();
-      if (endedSessionKey && nextSessionKey && nextSessionKey !== endedSessionKey) {
+      const nextSessionId = event.nextSessionId?.trim();
+      if (
+        (endedSessionKey && nextSessionKey && nextSessionKey !== endedSessionKey) ||
+        (nextSessionId && nextSessionId === event.sessionId.trim())
+      ) {
         return;
       }
       const config = resolveCurrentConfig();
