@@ -209,7 +209,7 @@ async function ingestMemoryWikiSourceUnlocked(params: {
     });
   }
   const compile =
-    changed && !params.dryRun && params.compile !== false
+    !params.dryRun && params.compile !== false
       ? await compileMemoryWikiVault(params.config)
       : undefined;
 

@@ -128,8 +128,8 @@ hello from source
     }
   });
 
-  it("does not rewrite or compile an unchanged source page", async () => {
-    const rootDir = await createTempDir("memory-wiki-ingest-noop-");
+  it("recompiles an unchanged source and repairs stale derived state", async () => {
+    const rootDir = await createTempDir("memory-wiki-ingest-recompile-");
     const inputPath = path.join(rootDir, "stable.txt");
     await fs.writeFile(inputPath, "stable source\n", "utf8");
     const { config } = await createVault({ rootDir: path.join(rootDir, "vault") });
@@ -142,6 +142,8 @@ hello from source
     });
     const pagePath = path.join(config.vault.path, first.pagePath);
     const before = await fs.readFile(pagePath, "utf8");
+    const indexPath = path.join(config.vault.path, "index.md");
+    await fs.writeFile(indexPath, "# Stale index\n", "utf8");
     const second = await ingestMemoryWikiSource({
       config,
       inputPath,
@@ -151,8 +153,17 @@ hello from source
 
     expect(first.changed).toBe(true);
     expect(second.changed).toBe(false);
-    expect(second.indexUpdatedFiles).toEqual([]);
+    expect(second.indexUpdatedFiles).toContain(indexPath);
     await expect(fs.readFile(pagePath, "utf8")).resolves.toBe(before);
+    await expect(fs.readFile(pagePath, "utf8")).resolves.toContain(
+      "ingestedAt: 2026-04-05T12:00:00.000Z",
+    );
+    await expect(fs.readFile(pagePath, "utf8")).resolves.toContain(
+      "updatedAt: 2026-04-05T12:00:00.000Z",
+    );
+    await expect(fs.readFile(indexPath, "utf8")).resolves.toContain(
+      "[Stable Reference](sources/stable-reference.md)",
+    );
   });
 
   it("clears stale evidence fields when regular ingest replaces an evidenced source", async () => {

@@ -105,7 +105,7 @@ Create the wiki vault layout and starter pages, including top-level indexes and 
 
 Import a local markdown or text file into the wiki `sources/` folder as a source page. `<path>` must be a local file path; there is no URL ingest today. Rejects binary files.
 
-Imported source pages carry provenance frontmatter (`sourceType: local-file`, `sourcePath`, `ingestedAt`). Ingest recompiles the vault only when the generated source page changes.
+Imported source pages carry provenance frontmatter (`sourceType: local-file`, `sourcePath`, `ingestedAt`). Regular ingest always recompiles the vault so it can repair stale derived state, but an unchanged generated source page is not rewritten. Batch ingest defers compilation to the enclosing batch and skips it when every operation is unchanged.
 
 Flags: `--title <title>` overrides the source title (default: derived from the filename).
 
