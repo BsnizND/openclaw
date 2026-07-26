@@ -6,7 +6,6 @@
  */
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { logWarn } from "../logger.js";
-import { isCronSessionKey } from "../sessions/session-key-utils.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
@@ -195,14 +194,6 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
   const requesterSessionKey = params.requesterSessionKey.trim();
   const initialState = params.settledEntry.requesterSettleWake;
   if (!requesterSessionKey || !initialState) {
-    return false;
-  }
-  if (isCronSessionKey(requesterSessionKey)) {
-    completeRequesterSettleWakeBatch({
-      runIds: [params.settledEntry.runId],
-      state: initialState,
-      completeBatch,
-    });
     return false;
   }
 
