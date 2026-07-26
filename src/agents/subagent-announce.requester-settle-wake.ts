@@ -6,6 +6,7 @@
  */
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { logWarn } from "../logger.js";
+import { isCronSessionKey } from "../sessions/session-key-utils.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
@@ -248,12 +249,12 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
   );
   // A frozen single-child batch can be re-admitted after its requester yielded.
   // The earlier steered completion died with that run, so the idle requester needs a fresh turn.
-  const requesterYieldedAfterDelivery = selectedState.afterRequesterYield === true;
+  const requesterNeedsFreshTurn =
+    selectedState.afterRequesterYield === true ||
+    (selectedState.requesterYieldBatch === true && isCronSessionKey(requesterSessionKey));
   if (
     requiredSettled.length === 0 ||
-    (requiredSettled.length < 2 &&
-      !hasUndeliveredRequiredCompletion &&
-      !requesterYieldedAfterDelivery) ||
+    (requiredSettled.length < 2 && !hasUndeliveredRequiredCompletion && !requesterNeedsFreshTurn) ||
     getSubagentDepthFromSessionStore(requesterSessionKey) >= 1
   ) {
     completeRequesterSettleWakeBatch({

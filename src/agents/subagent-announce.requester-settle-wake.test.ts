@@ -343,7 +343,7 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(deliverSpy).not.toHaveBeenCalled();
   });
 
-  it("wakes a yielded cron requester after its child settles", async () => {
+  it("wakes a yielded cron requester whose active child later settles", async () => {
     const cronRequester = "agent:main:cron:daily-report";
     sessionStore[cronRequester] = { sessionId: "sess-cron" };
     const child = makeSettledChild({
@@ -354,7 +354,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
         attemptCount: 0,
         batchRunIds: ["run-cron"],
         requesterYieldBatch: true,
-        afterRequesterYield: true,
         rearmGeneration: 1,
       },
     });
