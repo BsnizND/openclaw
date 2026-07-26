@@ -1,6 +1,6 @@
 // Requester settle wake tests cover the registry-less top-level requester:
 // drain gating, batch idempotency, and the guards that keep the wake out of
-// nested/cron/single-delivered paths.
+// nested and single-delivered paths.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
@@ -343,13 +343,34 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(deliverSpy).not.toHaveBeenCalled();
   });
 
-  it("skips cron requester sessions", async () => {
+  it("wakes a yielded cron requester after its child settles", async () => {
+    const cronRequester = "agent:main:cron:daily-report";
+    sessionStore[cronRequester] = { sessionId: "sess-cron" };
+    const child = makeSettledChild({
+      runId: "run-cron",
+      requesterSessionKey: cronRequester,
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds: ["run-cron"],
+        requesterYieldBatch: true,
+        afterRequesterYield: true,
+        rearmGeneration: 1,
+      },
+    });
+    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+
     const woke = await maybeWakeRequesterAfterAllChildrenSettled(
-      wakeParams({ requesterSessionKey: "agent:main:cron:daily-report" }),
+      wakeParams({ requesterSessionKey: cronRequester, settledEntry: child }),
     );
 
-    expect(woke).toBe(false);
-    expect(deliverSpy).not.toHaveBeenCalled();
+    expect(woke).toBe(true);
+    expect(deliverSpy).toHaveBeenCalledOnce();
+    expect(deliveredCallArg().targetRequesterSessionKey).toBe(cronRequester);
+    expect(deliveredCallArg().directIdempotencyKey).toBe(
+      `announce:requester-settle:${cronRequester}:run-cron:yield-1`,
+    );
+    expect(completeBatchSpy).toHaveBeenCalledWith(["run-cron"], 1);
   });
 
   it("skips requesters whose session entry is gone", async () => {
@@ -809,7 +830,7 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
       }
     });
 
-    it("resolves mixed keep/delete, nested, cron, and fire-and-forget obligations", async () => {
+    it("resolves mixed keep/delete, nested, and fire-and-forget obligations", async () => {
       const mixed = [
         makeSettledChild({ runId: "run-delete", cleanup: "delete" }),
         makeSettledChild({ runId: "run-keep", cleanup: "keep" }),
@@ -856,15 +877,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
         ),
       ).toBe(false);
       expect(completeBatchSpy).toHaveBeenLastCalledWith(["run-nested-a", "run-nested-b"]);
-
-      completeBatchSpy.mockClear();
-      const cron = makeSettledChild({ runId: "run-cron" });
-      expect(
-        await maybeWakeRequesterAfterAllChildrenSettled(
-          wakeParams({ requesterSessionKey: "agent:main:cron:daily", settledEntry: cron }),
-        ),
-      ).toBe(false);
-      expect(completeBatchSpy).toHaveBeenLastCalledWith(["run-cron"]);
     });
   });
 });
