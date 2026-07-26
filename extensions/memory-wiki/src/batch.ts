@@ -318,12 +318,13 @@ export async function runMemoryWikiApplyBatch(params: {
   const input = await readBatchInput(params.inputPath);
   const operations = await normalizeApplyOperations(input);
   return await withMemoryWikiVaultMutation(params.config.vault.path, async () => {
+    let changed = false;
     if (!params.dryRun) {
-      await initializeMemoryWikiVault(params.config);
+      const initialization = await initializeMemoryWikiVault(params.config);
+      changed = initialization.created;
     }
     const sourceIdsByRef = new Map<string, string>();
     const results: Array<Record<string, unknown>> = [];
-    let changed = false;
     for (const operation of operations) {
       if (operation.kind === "ingest-source") {
         const result = await ingestMemoryWikiSourceBatchOperation({

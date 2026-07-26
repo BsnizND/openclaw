@@ -63,6 +63,16 @@ describe("memory-wiki batch operations", () => {
     const repeated = await runMemoryWikiApplyBatch({ config, inputPath: applyPath, dryRun: true });
     expect(repeated.changed).toBe(false);
     expect(repeated.compile).toBeNull();
+
+    const indexPath = path.join(rootDir, "index.md");
+    await fs.rm(indexPath);
+    const repaired = await runMemoryWikiApplyBatch({ config, inputPath: applyPath });
+    expect(repaired.changed).toBe(true);
+    expect(repaired.operations.every((operation) => operation.changed === false)).toBe(true);
+    expect(repaired.compile).not.toBeNull();
+    await expect(fs.readFile(indexPath, "utf8")).resolves.toContain(
+      "[Alpha Reference](sources/alpha-reference.md)",
+    );
   });
 
   it("verifies exact, explanatory, and evidence queries from one batch", async () => {
