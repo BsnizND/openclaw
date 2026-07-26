@@ -757,11 +757,16 @@ export function createCodexAppServerBindingStore(
         return { kind: "resolved", result: true };
       }
       const currentSessionId = current.sessionId;
-      if (!currentSessionId || currentSessionId === identity.sessionId) {
+      if (!currentSessionId) {
         return {
           kind: "resolved",
           result: current.state !== "cleared" || current.retired !== true,
         };
+      }
+      if (currentSessionId === identity.sessionId) {
+        return current.state === "cleared" && current.retired === true
+          ? { kind: "verify", expectedPreviousSessionId: currentSessionId }
+          : { kind: "resolved", result: true };
       }
       return { kind: "verify", expectedPreviousSessionId: currentSessionId };
     },
@@ -787,8 +792,19 @@ export function createCodexAppServerBindingStore(
                 return { result: true };
               }
               if (ownsGeneration) {
+                if (current.state === "cleared" && current.retired === true) {
+                  return {
+                    result: true,
+                    next: {
+                      version: 1,
+                      state: "cleared",
+                      sessionId: identity.sessionId,
+                      ...ownedLease,
+                    },
+                  };
+                }
                 return {
-                  result: current.state !== "cleared" || current.retired !== true,
+                  result: true,
                 };
               }
               if (current.sessionId !== mutation.expectedPreviousSessionId) {

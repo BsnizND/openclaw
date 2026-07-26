@@ -958,6 +958,52 @@ describe("Codex app-server binding store", () => {
     await expect(store.read(current)).resolves.toMatchObject({ threadId: "thread-new" });
   });
 
+  it("lets the authoritative stable session reclaim its own mistakenly retired generation", async () => {
+    const { state, values } = createStateStore();
+    const store = createCodexAppServerBindingStore(state);
+    const identity = {
+      kind: "session" as const,
+      agentId: "main",
+      sessionId: "session-1",
+      sessionKey: "agent:main:telegram:chat-1",
+    };
+    await store.mutate(identity, {
+      kind: "set",
+      binding: { threadId: "thread-old", cwd: "/old" },
+    });
+    await expect(store.retireSessionGeneration(identity)).resolves.toBe("applied");
+
+    const plan = await store.prepareSessionGenerationReclaim(identity);
+    expect(plan).toEqual({
+      kind: "verify",
+      expectedPreviousSessionId: identity.sessionId,
+    });
+    if (plan.kind !== "verify") {
+      throw new Error("expected retired current generation verification");
+    }
+    await expect(
+      store.mutate(identity, {
+        kind: "reclaim-generation",
+        expectedPreviousSessionId: plan.expectedPreviousSessionId,
+      }),
+    ).resolves.toBe(true);
+    expect(values.get(bindingStoreKey(identity))).toEqual({
+      version: 1,
+      state: "cleared",
+      sessionId: identity.sessionId,
+    });
+    await expect(
+      store.mutate(identity, {
+        kind: "set",
+        binding: { threadId: "thread-recovered", cwd: "/recovered" },
+      }),
+    ).resolves.toBe(true);
+    await expect(store.read(identity)).resolves.toMatchObject({
+      threadId: "thread-recovered",
+      cwd: "/recovered",
+    });
+  });
+
   it("drains an in-flight ownership mutation and rejects late attachment during archive", async () => {
     const fixture = createStateStore();
     const stateUpdate = fixture.state.update;
