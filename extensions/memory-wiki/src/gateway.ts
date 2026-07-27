@@ -319,7 +319,6 @@ export function registerMemoryWikiGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         const { agentId, appConfig, config } = resolveRequestContext(requestParams);
-        await syncImportedSourcesIfNeeded(config, appConfig);
         const query = readStringParam(requestParams, "query", { required: true });
         const maxResults = readPositiveIntegerParam(requestParams, "maxResults");
         const searchBackend = readEnumParam(requestParams, "backend", WIKI_SEARCH_BACKENDS);
@@ -386,7 +385,6 @@ export function registerMemoryWikiGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         const { agentId, appConfig, config } = resolveRequestContext(requestParams);
-        await syncImportedSourcesIfNeeded(config, appConfig);
         const lookup = readStringParam(requestParams, "lookup", { required: true });
         const fromLine = readPositiveIntegerParam(requestParams, "fromLine");
         const lineCount = readPositiveIntegerParam(requestParams, "lineCount");
