@@ -1356,8 +1356,19 @@ async function searchWikiCorpus(params: {
   maxResults: number;
   mode: WikiSearchMode;
 }): Promise<WikiSearchResult[]> {
-  const digest = await readQueryDigestBundle(params.config);
   const rootDir = params.config.vault.path;
+  // Ordinary recall reads current semantic pages directly. Raw source pages
+  // remain available through explicit source-evidence mode, but they are not a
+  // compiled or filesystem shadow fallback for active knowledge.
+  if (params.mode !== "source-evidence") {
+    const semanticPaths = await listWikiMarkdownFiles(rootDir, SEMANTIC_QUERY_DIRS);
+    const semanticPages = await readQueryableWikiPagesByPaths(rootDir, semanticPaths);
+    return semanticPages
+      .map((page) => toWikiSearchResult(page, params.query, params.mode))
+      .filter((page) => page.score > 0);
+  }
+
+  const digest = await readQueryDigestBundle(params.config);
   const digestCandidatePaths = digest
     ? buildDigestCandidatePaths({
         digest,
@@ -1366,18 +1377,10 @@ async function searchWikiCorpus(params: {
         mode: params.mode,
       })
     : [];
-  const semanticDigestCandidatePaths = digestCandidatePaths.filter(
-    (relativePath) => !relativePath.replace(/\\/g, "/").startsWith("sources/"),
-  );
-  const candidatePaths =
-    params.mode === "source-evidence"
-      ? digestCandidatePaths
-      : semanticDigestCandidatePaths.length > 0
-        ? semanticDigestCandidatePaths
-        : await listWikiMarkdownFiles(rootDir, SEMANTIC_QUERY_DIRS);
+  const candidatePaths = digestCandidatePaths;
   const seenPaths = new Set<string>();
   const candidatePages =
-    params.mode !== "source-evidence" || candidatePaths.length > 0
+    candidatePaths.length > 0
       ? await readQueryableWikiPagesByPaths(rootDir, candidatePaths)
       : await readQueryableWikiPages(rootDir);
   for (const page of candidatePages) {
@@ -1387,10 +1390,7 @@ async function searchWikiCorpus(params: {
   const results = candidatePages
     .map((page) => toWikiSearchResult(page, params.query, params.mode))
     .filter((page) => page.score > 0);
-  // Ordinary recall is served only from semantic pages. Raw source pages remain
-  // available through the explicit source-evidence mode, but they are not a
-  // shadow semantic fallback when compiled candidates miss.
-  if (params.mode !== "source-evidence" || results.length >= params.maxResults) {
+  if (results.length >= params.maxResults) {
     return results;
   }
 
