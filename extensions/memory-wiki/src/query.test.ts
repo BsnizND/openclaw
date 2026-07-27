@@ -172,6 +172,47 @@ function createMemoryManager(overrides?: {
 }
 
 describe("getMemoryWikiPage", () => {
+  it("reads an exact canonical page id without a compiled cache or vault scan", async () => {
+    const { rootDir, config } = await createQueryVault({ initialize: true });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "lifeos-topic-media-timeline.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "synthesis.lifeos-topic-media-timeline",
+          title: "LifeOS topic: media-timeline",
+        },
+        body: "# LifeOS topic: media-timeline\n\nCurrent projection.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "unrelated.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.unrelated",
+          title: "Unrelated",
+        },
+        body: "# Unrelated\n\nMust not be read.\n",
+      }),
+      "utf8",
+    );
+    const readdir = vi.spyOn(fs, "readdir");
+
+    await expect(
+      getMemoryWikiPage({
+        config,
+        lookup: "synthesis.lifeos-topic-media-timeline",
+      }),
+    ).resolves.toMatchObject({
+      path: "syntheses/lifeos-topic-media-timeline.md",
+      title: "LifeOS topic: media-timeline",
+      content: expect.stringContaining("Current projection."),
+    });
+    expect(readdir).not.toHaveBeenCalled();
+  });
+
   it("reads an exact compiled page without scanning the vault", async () => {
     const { rootDir, config } = await createQueryVault({ initialize: true });
     await fs.writeFile(
