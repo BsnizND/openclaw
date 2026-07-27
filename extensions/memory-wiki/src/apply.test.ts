@@ -2,7 +2,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyMemoryWikiMutation, normalizeMemoryWikiMutationInput } from "./apply.js";
+import {
+  applyMemoryWikiMutation,
+  applyMemoryWikiMutations,
+  normalizeMemoryWikiMutationInput,
+} from "./apply.js";
 import { parseWikiMarkdown, renderWikiMarkdown } from "./markdown.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
 
@@ -173,6 +177,60 @@ describe("applyMemoryWikiMutation", () => {
     await expect(
       fs.readFile(path.join(rootDir, ".openclaw-wiki", "log.jsonl"), "utf8"),
     ).resolves.toBe(logBefore);
+  });
+
+  it("applies multiple synthesis mutations with one compiled vault result", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-apply-batch-",
+    });
+
+    const result = await applyMemoryWikiMutations({
+      config,
+      mutations: [
+        {
+          op: "create_synthesis",
+          title: "Alpha Batch",
+          body: "Alpha batch summary.",
+          sourceIds: ["source.alpha"],
+        },
+        {
+          op: "create_synthesis",
+          title: "Beta Batch",
+          body: "Beta batch summary.",
+          sourceIds: ["source.beta"],
+        },
+      ],
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        changed: true,
+        operation: "create_synthesis",
+        pagePath: "syntheses/alpha-batch.md",
+        pageId: "synthesis.alpha-batch",
+      }),
+      expect.objectContaining({
+        changed: true,
+        operation: "create_synthesis",
+        pagePath: "syntheses/beta-batch.md",
+        pageId: "synthesis.beta-batch",
+      }),
+    ]);
+    expect(result.compile?.pageCounts.synthesis).toBe(2);
+    const index = await fs.readFile(path.join(rootDir, "index.md"), "utf8");
+    expect(index).toContain("[Alpha Batch](syntheses/alpha-batch.md)");
+    expect(index).toContain("[Beta Batch](syntheses/beta-batch.md)");
+  });
+
+  it("rejects an empty mutation batch", async () => {
+    const { config } = await createVault({
+      prefix: "memory-wiki-apply-empty-batch-",
+    });
+
+    await expect(applyMemoryWikiMutations({ config, mutations: [] })).rejects.toThrow(
+      "requires at least one mutation",
+    );
   });
 
   it("applies a write when an unrelated vault page has malformed frontmatter (#96125)", async () => {
