@@ -143,6 +143,38 @@ describe("applyMemoryWikiMutation", () => {
     );
   });
 
+  it("does not recompile an unchanged synthesis mutation", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-apply-idempotent-",
+    });
+    const mutation = {
+      op: "create_synthesis" as const,
+      title: "Stable Synthesis",
+      body: "Stable summary body.",
+      sourceIds: ["source.stable"],
+      status: "active",
+    };
+
+    const first = await applyMemoryWikiMutation({ config, mutation });
+    const pageBefore = await fs.readFile(path.join(rootDir, first.pagePath), "utf8");
+    const logBefore = await fs.readFile(path.join(rootDir, ".openclaw-wiki", "log.jsonl"), "utf8");
+    const second = await applyMemoryWikiMutation({ config, mutation });
+
+    expect(first.changed).toBe(true);
+    expect(first.compile).toBeDefined();
+    expect(second).toMatchObject({
+      changed: false,
+      operation: "create_synthesis",
+      pagePath: first.pagePath,
+      pageId: first.pageId,
+    });
+    expect(second.compile).toBeUndefined();
+    await expect(fs.readFile(path.join(rootDir, first.pagePath), "utf8")).resolves.toBe(pageBefore);
+    await expect(
+      fs.readFile(path.join(rootDir, ".openclaw-wiki", "log.jsonl"), "utf8"),
+    ).resolves.toBe(logBefore);
+  });
+
   it("applies a write when an unrelated vault page has malformed frontmatter (#96125)", async () => {
     const { rootDir, config } = await createVault({
       prefix: "memory-wiki-apply-unrelated-invalid-",
