@@ -468,7 +468,7 @@ describe("searchMemoryWiki", () => {
     expect(results[0]?.snippet).toContain("Teams");
   });
 
-  it("uses compiled digest candidates when query terms are dispersed across metadata", async () => {
+  it("searches current semantic pages when query terms are dispersed across metadata", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,
     });
@@ -511,7 +511,6 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
     await compileMemoryWikiVault(config);
-    const readdir = vi.spyOn(fs, "readdir");
     const readFile = vi.spyOn(fs, "readFile");
 
     const results = await searchMemoryWiki({
@@ -528,9 +527,7 @@ describe("searchMemoryWiki", () => {
         ([file]) => typeof file === "string" && file.endsWith("sources/raw-shadow.md"),
       ),
     ).toBe(false);
-    expect(readdir).not.toHaveBeenCalled();
     readFile.mockRestore();
-    readdir.mockRestore();
   });
 
   it("searches active syntheses first while the compiled cache is unavailable", async () => {
