@@ -24,6 +24,7 @@ import type { DetachedTaskFindResult } from "../tasks/detached-task-runtime-cont
 import {
   completeTaskRunByRunId,
   failTaskRunByRunId,
+  finalizeTaskRunByRunId,
   setDetachedTaskDeliveryStatusByRunId,
 } from "../tasks/detached-task-runtime.js";
 import { isProvisionalSubagentKillTask } from "../tasks/task-cancellation-state.js";
@@ -94,6 +95,8 @@ type MaybeWakeRequesterAfterAllChildrenSettled =
   (typeof import("./subagent-announce.requester-settle-wake.js"))["maybeWakeRequesterAfterAllChildrenSettled"];
 type RequesterSettleWakeBatchState =
   import("./subagent-announce.requester-settle-wake.js").RequesterSettleWakeBatchState;
+type RequesterSettleWakeResolution =
+  import("./subagent-announce.requester-settle-wake.js").RequesterSettleWakeResolution;
 type BrowserCleanupModule = Pick<
   typeof import("../browser-lifecycle-cleanup.js"),
   "cleanupBrowserSessionsForLifecycleEnd"
@@ -548,6 +551,54 @@ export function createSubagentRegistryLifecycleController(params: {
     }
   };
 
+  const reconcileSubagentTaskAfterRequesterSettle = (
+    entry: SubagentRunRecord,
+    resolution: Exclude<RequesterSettleWakeResolution, { status: "unchanged" }>,
+  ) => {
+    const target = resolveSubagentTaskTarget(entry);
+    if (resolution.status === "delivered") {
+      setDetachedTaskDeliveryStatusByRunId({
+        runId: target.runId,
+        runtime: "subagent",
+        sessionKey: target.sessionKey,
+        deliveryStatus: "delivered",
+      });
+      const terminal = resolveFinalizedSubagentTaskState(entry);
+      if (!terminal || terminal.status !== "succeeded") {
+        return;
+      }
+      finalizeTaskRunByRunId({
+        runId: target.runId,
+        runtime: "subagent",
+        sessionKey: target.sessionKey,
+        ...terminal,
+        clearError: true,
+      });
+      return;
+    }
+    const reason = resolution.error ?? "requester settle wake failed";
+    setDetachedTaskDeliveryStatusByRunId({
+      runId: target.runId,
+      runtime: "subagent",
+      sessionKey: target.sessionKey,
+      deliveryStatus: "failed",
+      error: reason,
+    });
+    if (entry.expectsCompletionMessage === true && entry.outcome?.status === "ok") {
+      const terminalResult = resolveRequiredCompletionDeliveryFailureTerminalResult(reason);
+      completeTaskRunByRunId({
+        runId: target.runId,
+        runtime: "subagent",
+        sessionKey: target.sessionKey,
+        endedAt: entry.endedAt ?? Date.now(),
+        lastEventAt: Date.now(),
+        progressSummary: ensureCompletionState(entry).resultText ?? undefined,
+        terminalSummary: terminalResult.terminalSummary,
+        terminalOutcome: terminalResult.terminalOutcome,
+      });
+    }
+  };
+
   const safeMarkRequiredCompletionDeliveryBlocked = (args: {
     entry: SubagentRunRecord;
     reason?: string;
@@ -815,6 +866,7 @@ export function createSubagentRegistryLifecycleController(params: {
   const completeRequesterSettleWakeBatch = (
     runIds: readonly string[],
     rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
   ) => {
     const entries = runIds
       .map((runId) => [runId, params.runs.get(runId)] as const)
@@ -827,7 +879,36 @@ export function createSubagentRegistryLifecycleController(params: {
     const previousStates = entries.map(([, entry]) => ({
       requesterSettleWake: structuredClone(entry.requesterSettleWake),
       retireAfterRequesterTurn: entry.retireAfterRequesterTurn,
+      delivery: structuredClone(entry.delivery),
     }));
+    const resolvedEntries = entries
+      .map(([, entry]) => entry)
+      .filter(
+        (entry) =>
+          entry.expectsCompletionMessage === true &&
+          entry.delivery?.status !== "delivered" &&
+          (resolution?.status === "delivered" || resolution?.status === "failed"),
+      );
+    if (resolution?.status === "delivered" || resolution?.status === "failed") {
+      for (const entry of resolvedEntries) {
+        // Task/Flow is the durable presentation owner. Update it first so a
+        // crash before registry cleanup simply replays this idempotent settle.
+        reconcileSubagentTaskAfterRequesterSettle(entry, resolution);
+      }
+    }
+    for (const entry of resolvedEntries) {
+      clearPendingFinalDelivery(entry);
+      const delivery = ensureDeliveryState(entry);
+      if (resolution?.status === "delivered") {
+        delivery.status = "delivered";
+        delivery.deliveredAt = Date.now();
+        delivery.announcedAt ??= delivery.deliveredAt;
+        delivery.lastError = undefined;
+      } else if (resolution?.status === "failed") {
+        delivery.status = "failed";
+        delivery.lastError = resolution.error ?? "requester settle wake failed";
+      }
+    }
     for (const [runId, entry] of entries) {
       if (entry.requesterTurnRunId) {
         entry.retireAfterRequesterTurn =
@@ -850,6 +931,7 @@ export function createSubagentRegistryLifecycleController(params: {
         params.runs.set(runId, entry);
         entry.requesterSettleWake = previous?.requesterSettleWake;
         entry.retireAfterRequesterTurn = previous?.retireAfterRequesterTurn;
+        entry.delivery = previous?.delivery;
       });
       throw error;
     }
@@ -1012,15 +1094,17 @@ export function createSubagentRegistryLifecycleController(params: {
     completion.fallbackResultText = undefined;
     completion.fallbackCapturedAt = undefined;
     params.resumedRuns.delete(args.runId);
-    safeSetSubagentTaskDeliveryStatus({
-      entry: args.entry,
-      deliveryStatus: "failed",
-      deliveryError: getDeliveryLastError(args.entry) ?? args.reason,
-    });
-    safeMarkRequiredCompletionDeliveryBlocked({
-      entry: args.entry,
-      reason: getDeliveryLastError(args.entry) ?? args.reason,
-    });
+    if (args.entry.requesterTurnYielded !== true) {
+      safeSetSubagentTaskDeliveryStatus({
+        entry: args.entry,
+        deliveryStatus: "failed",
+        deliveryError: getDeliveryLastError(args.entry) ?? args.reason,
+      });
+      safeMarkRequiredCompletionDeliveryBlocked({
+        entry: args.entry,
+        reason: getDeliveryLastError(args.entry) ?? args.reason,
+      });
+    }
     logAnnounceGiveUp(args.entry, args.reason);
     markRequesterSettleWakePending(args.entry);
     try {
@@ -1063,15 +1147,17 @@ export function createSubagentRegistryLifecycleController(params: {
     const failedDelivery = ensureDeliveryState(giveUpParams.entry);
     failedDelivery.status = "failed";
     failedDelivery.lastError = deliveryError;
-    safeSetSubagentTaskDeliveryStatus({
-      entry: giveUpParams.entry,
-      deliveryStatus: "failed",
-      deliveryError,
-    });
-    safeMarkRequiredCompletionDeliveryBlocked({
-      entry: giveUpParams.entry,
-      reason: deliveryError,
-    });
+    if (giveUpParams.entry.requesterTurnYielded !== true) {
+      safeSetSubagentTaskDeliveryStatus({
+        entry: giveUpParams.entry,
+        deliveryStatus: "failed",
+        deliveryError,
+      });
+      safeMarkRequiredCompletionDeliveryBlocked({
+        entry: giveUpParams.entry,
+        reason: deliveryError,
+      });
+    }
     giveUpParams.entry.wakeOnDescendantSettle = undefined;
     const completion = ensureCompletionState(giveUpParams.entry);
     completion.fallbackResultText = undefined;
@@ -1514,15 +1600,17 @@ export function createSubagentRegistryLifecycleController(params: {
         failedDelivery.attemptCount = deferredDecision.retryCount;
         failedDelivery.lastAttemptAt = now;
       }
-      safeSetSubagentTaskDeliveryStatus({
-        entry,
-        deliveryStatus: "failed",
-        deliveryError,
-      });
-      safeMarkRequiredCompletionDeliveryBlocked({
-        entry,
-        reason: deliveryError,
-      });
+      if (entry.requesterTurnYielded !== true) {
+        safeSetSubagentTaskDeliveryStatus({
+          entry,
+          deliveryStatus: "failed",
+          deliveryError,
+        });
+        safeMarkRequiredCompletionDeliveryBlocked({
+          entry,
+          reason: deliveryError,
+        });
+      }
       entry.wakeOnDescendantSettle = undefined;
       const completion = ensureCompletionState(entry);
       completion.fallbackResultText = undefined;
