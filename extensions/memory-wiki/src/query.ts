@@ -29,6 +29,7 @@ import {
 import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
 import {
   parseWikiMarkdown,
+  slugifyWikiPageStem,
   toWikiPageSummary,
   type WikiClaim,
   type WikiPageSummary,
@@ -1405,6 +1406,43 @@ function resolveDigestPageLookup(digest: QueryDigestBundle, lookup: string): str
   return match?.path ?? null;
 }
 
+function resolveCanonicalPageIdPath(lookup: string): string | null {
+  const match = lookup.trim().match(/^(entity|concept|source|synthesis|report)\.(.+)$/);
+  if (!match) {
+    return null;
+  }
+  const directoryByKind = {
+    entity: "entities",
+    concept: "concepts",
+    source: "sources",
+    synthesis: "syntheses",
+    report: "reports",
+  } as const;
+  const kind = match[1] as keyof typeof directoryByKind;
+  const idTail = match[2]?.trim();
+  if (!idTail) {
+    return null;
+  }
+  return `${directoryByKind[kind]}/${slugifyWikiPageStem(idTail)}.md`;
+}
+
+async function readQueryableWikiPageByPathIfPresent(
+  rootDir: string,
+  relativePath: string | null,
+): Promise<QueryableWikiPage | null> {
+  if (!relativePath) {
+    return null;
+  }
+  try {
+    return (await readQueryableWikiPagesByPaths(rootDir, [relativePath]))[0] ?? null;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export function resolveQueryableWikiPageByLookup(
   pages: QueryableWikiPage[],
   lookup: string,
@@ -1517,20 +1555,32 @@ export async function getMemoryWikiPage(params: {
   const lineCount = normalizePositiveInteger(params.lineCount, 200);
 
   if (shouldSearchWiki(effectiveConfig)) {
-    const digest = await readQueryDigestBundle(effectiveConfig);
-    const digestLookupPagePath = digest
-      ? (resolveDigestClaimLookup(digest, params.lookup) ??
-        resolveDigestPageLookup(digest, params.lookup))
-      : null;
-    const digestLookupPage = digestLookupPagePath
-      ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestLookupPagePath])
-        )[0] ?? null)
-      : null;
-    const pages = digestLookupPage
-      ? [digestLookupPage]
-      : await readQueryableWikiPages(effectiveConfig.vault.path);
-    const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
+    const directLookupPageCandidate = await readQueryableWikiPageByPathIfPresent(
+      effectiveConfig.vault.path,
+      resolveCanonicalPageIdPath(params.lookup),
+    );
+    const directLookupPage =
+      directLookupPageCandidate &&
+      resolveQueryableWikiPageByLookup([directLookupPageCandidate], params.lookup)
+        ? directLookupPageCandidate
+        : null;
+    const digest = directLookupPage ? null : await readQueryDigestBundle(effectiveConfig);
+    const digestLookupPage = await readQueryableWikiPageByPathIfPresent(
+      effectiveConfig.vault.path,
+      digest
+        ? (resolveDigestClaimLookup(digest, params.lookup) ??
+            resolveDigestPageLookup(digest, params.lookup))
+        : null,
+    );
+    const pages = directLookupPage
+      ? [directLookupPage]
+      : digestLookupPage
+        ? [digestLookupPage]
+        : await readQueryableWikiPages(effectiveConfig.vault.path);
+    const page =
+      directLookupPage ??
+      digestLookupPage ??
+      resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);
       const lines = parsed.body.split(/\r?\n/);
