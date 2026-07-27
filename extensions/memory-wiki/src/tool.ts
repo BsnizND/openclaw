@@ -158,7 +158,6 @@ export function createWikiSearchTool(
         corpus?: ResolvedMemoryWikiConfig["search"]["corpus"];
         mode?: (typeof WIKI_SEARCH_MODES)[number];
       };
-      await syncImportedSourcesIfNeeded(config, appConfig);
       const results = await searchMemoryWiki({
         config,
         appConfig,
@@ -282,7 +281,6 @@ export function createWikiGetTool(
         backend?: ResolvedMemoryWikiConfig["search"]["backend"];
         corpus?: ResolvedMemoryWikiConfig["search"]["corpus"];
       };
-      await syncImportedSourcesIfNeeded(config, appConfig);
       const result = await getMemoryWikiPage({
         config,
         appConfig,

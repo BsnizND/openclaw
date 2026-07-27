@@ -11,7 +11,7 @@ import { listMemoryWikiImportInsights } from "./import-insights.js";
 import { listMemoryWikiImportRuns } from "./import-runs.js";
 import { ingestMemoryWikiSource } from "./ingest.js";
 import { listMemoryWikiPalace } from "./memory-palace.js";
-import { searchMemoryWiki } from "./query.js";
+import { getMemoryWikiPage, searchMemoryWiki } from "./query.js";
 import { syncMemoryWikiImportedSources } from "./source-sync.js";
 import { resolveMemoryWikiStatus } from "./status.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
@@ -201,6 +201,7 @@ describe("memory-wiki gateway methods", () => {
       items: [],
       total: 0,
     } as never);
+    vi.mocked(getMemoryWikiPage).mockResolvedValue(null);
   });
 
   it("registers Obsidian CLI methods with write scope", async () => {
@@ -735,10 +736,44 @@ describe("memory-wiki gateway methods", () => {
       searchCorpus: "wiki",
       mode: "route-question",
     });
+    expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
     expect(readRespondPayload(respond)).toEqual({
       items: [],
       total: 0,
     });
+  });
+
+  it("reads wiki.get without synchronizing imported sources", async () => {
+    const { config } = await createVault({ prefix: "memory-wiki-gateway-" });
+    const { api, registerGatewayMethod } = createPluginApi();
+
+    registerMemoryWikiGatewayMethods({ api, config });
+    const handler = findGatewayHandler(registerGatewayMethod, "wiki.get");
+    if (!handler) {
+      throw new Error("wiki.get handler missing");
+    }
+    const respond = vi.fn();
+
+    await handler({
+      params: {
+        lookup: "synthesis.preference-memory-active-catalog",
+        corpus: "wiki",
+        backend: "local",
+      },
+      respond,
+    });
+
+    expect(getMemoryWikiPage).toHaveBeenCalledWith({
+      config,
+      appConfig: undefined,
+      lookup: "synthesis.preference-memory-active-catalog",
+      fromLine: undefined,
+      lineCount: undefined,
+      searchBackend: "local",
+      searchCorpus: "wiki",
+    });
+    expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
+    expect(readRespondPayload(respond)).toBeNull();
   });
 
   it("passes the default agent scope to shared wiki.search gateway calls", async () => {
