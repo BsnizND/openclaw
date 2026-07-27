@@ -463,6 +463,51 @@ describe("searchMemoryWiki", () => {
     expect(results[0]?.snippet).toContain("Teams");
   });
 
+  it("uses compiled digest candidates when query terms are dispersed across metadata", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "all-well.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "synthesis.preference-memory-active-catalog",
+          title: "Active preference catalog",
+          claims: [
+            {
+              id: "claim.all-well.effort",
+              text: "All Well is not a low-effort default.",
+              status: "supported",
+              evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
+            },
+            {
+              id: "claim.all-well.energy",
+              text: "Brian may be exhausted after a demanding day.",
+              status: "supported",
+              evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
+            },
+          ],
+        },
+        body: "# Active preference catalog\n\nCurrent correction-backed synthesis.\n",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+    const readdir = vi.spyOn(fs, "readdir");
+
+    const results = await searchMemoryWiki({
+      config,
+      query: "All Well exhausted low-effort",
+      maxResults: 5,
+    });
+
+    expect(results[0]?.path).toBe("syntheses/all-well.md");
+    expect(results.map((result) => result.path)).toContain("syntheses/all-well.md");
+    expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
+  });
+
   it("supports people-routing search modes and claim evidence drilldown metadata", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,
