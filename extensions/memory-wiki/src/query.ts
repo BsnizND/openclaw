@@ -208,10 +208,13 @@ function mergeWikiSearchCorpusResults(params: {
   return sortWikiSearchResults(selected).slice(0, params.maxResults);
 }
 
-async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
+async function listWikiMarkdownFiles(
+  rootDir: string,
+  relativeDirs: readonly (typeof QUERY_DIRS)[number][] = QUERY_DIRS,
+): Promise<string[]> {
   const files = (
     await Promise.all(
-      QUERY_DIRS.map(async (relativeDir) => {
+      relativeDirs.map(async (relativeDir) => {
         const dirPath = path.join(rootDir, relativeDir);
         const entries = await fs
           .readdir(dirPath, { withFileTypes: true, recursive: true })
@@ -1361,7 +1364,9 @@ async function searchWikiCorpus(params: {
         maxResults: params.maxResults,
         mode: params.mode,
       })
-    : [];
+    : params.mode === "source-evidence"
+      ? []
+      : await listWikiMarkdownFiles(rootDir, ["syntheses"]);
   const seenPaths = new Set<string>();
   const candidatePages =
     candidatePaths.length > 0
