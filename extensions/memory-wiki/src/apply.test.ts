@@ -98,7 +98,7 @@ describe("applyMemoryWikiMutation", () => {
     expect(result.changed).toBe(true);
     expect(result.pagePath).toBe("syntheses/alpha-synthesis.md");
     expect(result.pageId).toBe("synthesis.alpha-synthesis");
-    expect(result.compile.pageCounts.synthesis).toBe(1);
+    expect(result.compile?.pageCounts.synthesis).toBe(1);
 
     const page = await fs.readFile(path.join(rootDir, result.pagePath), "utf8");
     const parsed = parseWikiMarkdown(page);
@@ -204,9 +204,9 @@ describe("applyMemoryWikiMutation", () => {
     });
 
     expect(result.changed).toBe(true);
-    expect(result.compile.pageCounts.source).toBe(0);
-    expect(result.compile.pageCounts.synthesis).toBe(1);
-    expect(result.compile.frontmatterErrors).toEqual([
+    expect(result.compile?.pageCounts.source).toBe(0);
+    expect(result.compile?.pageCounts.synthesis).toBe(1);
+    expect(result.compile?.frontmatterErrors).toEqual([
       expect.objectContaining({ relativePath: "sources/broken.md" }),
     ]);
     await expect(fs.readFile(brokenPath, "utf8")).resolves.toBe(brokenPage);
@@ -313,7 +313,7 @@ keep this note
 
     expect(result.changed).toBe(true);
     expect(result.pagePath).toBe("entities/alpha.md");
-    expect(result.compile.pageCounts.entity).toBe(1);
+    expect(result.compile?.pageCounts.entity).toBe(1);
 
     const updated = await fs.readFile(targetPath, "utf8");
     const parsed = parseWikiMarkdown(updated);
