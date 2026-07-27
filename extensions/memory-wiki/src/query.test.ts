@@ -312,7 +312,7 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "alpha" });
+    const results = await searchMemoryWiki({ config, query: "alpha", mode: "source-evidence" });
 
     expect(results).toHaveLength(1);
     expect(results[0]?.corpus).toBe("wiki");
@@ -347,7 +347,11 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "needle" });
+    const results = await searchMemoryWiki({
+      config,
+      query: "needle",
+      mode: "source-evidence",
+    });
 
     expect(collectWikiResultPaths(results)).toEqual(["sources/healthy.md"]);
   });
@@ -369,6 +373,7 @@ describe("searchMemoryWiki", () => {
       config,
       query: "alpha",
       maxResults: Number.NaN,
+      mode: "source-evidence",
     });
 
     expect(results).toHaveLength(1);
@@ -493,8 +498,21 @@ describe("searchMemoryWiki", () => {
       }),
       "utf8",
     );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "raw-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.raw-shadow",
+          title: "All Well exhausted low-effort raw shadow",
+        },
+        body: "# Raw shadow\n\nThis evidence page is not an active semantic answer.\n",
+      }),
+      "utf8",
+    );
     await compileMemoryWikiVault(config);
     const readdir = vi.spyOn(fs, "readdir");
+    const readFile = vi.spyOn(fs, "readFile");
 
     const results = await searchMemoryWiki({
       config,
@@ -504,7 +522,14 @@ describe("searchMemoryWiki", () => {
 
     expect(results[0]?.path).toBe("syntheses/all-well.md");
     expect(results.map((result) => result.path)).toContain("syntheses/all-well.md");
+    expect(results.map((result) => result.path)).not.toContain("sources/raw-shadow.md");
+    expect(
+      readFile.mock.calls.some(
+        ([file]) => typeof file === "string" && file.endsWith("sources/raw-shadow.md"),
+      ),
+    ).toBe(false);
     expect(readdir).not.toHaveBeenCalled();
+    readFile.mockRestore();
     readdir.mockRestore();
   });
 
@@ -874,7 +899,11 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "alpha" });
+    const results = await searchMemoryWiki({
+      config,
+      query: "alpha",
+      mode: "source-evidence",
+    });
 
     expect(results).toHaveLength(1);
     expectFields(results[0], {
@@ -921,6 +950,7 @@ describe("searchMemoryWiki", () => {
       appConfig: createAppConfig(),
       query: "alpha",
       maxResults: 5,
+      mode: "source-evidence",
     });
 
     expect(results).toHaveLength(2);
@@ -1457,7 +1487,11 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "Source" });
+    const results = await searchMemoryWiki({
+      config,
+      query: "Source",
+      mode: "source-evidence",
+    });
 
     expect(results).toHaveLength(2);
     const paths = results.map((r) => r.path).toSorted();
@@ -1694,6 +1728,7 @@ describe("searchMemoryWiki", () => {
       config,
       appConfig: createAppConfig(),
       query: "alpha",
+      mode: "source-evidence",
     });
 
     expect(results).toHaveLength(1);
