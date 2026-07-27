@@ -62,6 +62,7 @@ vi.mock("./subagent-depth.js", () => ({
 import {
   maybeWakeRequesterAfterAllChildrenSettled,
   type RequesterSettleWakeBatchState,
+  type RequesterSettleWakeResolution,
 } from "./subagent-announce.requester-settle-wake.js";
 
 const REQUESTER = "agent:main:main";
@@ -105,7 +106,12 @@ function transitionBatch(runIds: readonly string[], state: RequesterSettleWakeBa
   }
 }
 
-function completeBatch(runIds: readonly string[], rearmGeneration?: number): void {
+function completeBatch(
+  runIds: readonly string[],
+  rearmGeneration?: number,
+  resolution?: RequesterSettleWakeResolution,
+): void {
+  void resolution;
   if (rearmGeneration === undefined) {
     completeBatchSpy(runIds);
   } else {
@@ -388,9 +394,14 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
       },
     });
     registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+    const resolvedBatch = vi.fn();
 
     const woke = await maybeWakeRequesterAfterAllChildrenSettled(
-      wakeParams({ requesterSessionKey: cronRunRequester, settledEntry: child }),
+      wakeParams({
+        requesterSessionKey: cronRunRequester,
+        settledEntry: child,
+        completeBatch: resolvedBatch,
+      }),
     );
 
     expect(woke).toBe(true);
@@ -405,7 +416,9 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
       cronRunRequester,
       "run-cron-scoped",
     );
-    expect(completeBatchSpy).toHaveBeenCalledWith(["run-cron-scoped"], 1);
+    expect(resolvedBatch).toHaveBeenCalledWith(["run-cron-scoped"], 1, {
+      status: "delivered",
+    });
   });
 
   it("skips requesters whose session entry is gone", async () => {

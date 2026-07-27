@@ -58,6 +58,10 @@ type SettledRunSummary = Pick<
 >;
 
 export type RequesterSettleWakeBatchState = Omit<RequesterSettleWakeState, "retireAfterSettle">;
+export type RequesterSettleWakeResolution =
+  | { status: "delivered" }
+  | { status: "failed"; error?: string }
+  | { status: "unchanged" };
 
 const REQUESTER_SETTLE_WAKE_MAX_ATTEMPTS = 3;
 const REQUESTER_SETTLE_WAKE_MAX_AMBIGUOUS_REPLAYS = 3;
@@ -160,13 +164,18 @@ function deferRequesterSettleWakeBatch(params: {
 function completeRequesterSettleWakeBatch(params: {
   runIds: readonly string[];
   state: RequesterSettleWakeBatchState;
-  completeBatch(runIds: readonly string[], rearmGeneration?: number): void;
+  resolution: RequesterSettleWakeResolution;
+  completeBatch(
+    runIds: readonly string[],
+    rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
+  ): void;
 }): void {
   if (params.state.rearmGeneration === undefined) {
-    params.completeBatch(params.runIds);
+    params.completeBatch(params.runIds, undefined, params.resolution);
     return;
   }
-  params.completeBatch(params.runIds, params.state.rearmGeneration);
+  params.completeBatch(params.runIds, params.state.rearmGeneration, params.resolution);
 }
 
 /**
@@ -179,19 +188,21 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
   requesterOrigin?: DeliveryContext;
   settledEntry: SubagentRunRecord;
   transitionBatch: (runIds: readonly string[], state: RequesterSettleWakeBatchState) => void;
-  completeBatch(runIds: readonly string[], rearmGeneration?: number): void;
+  completeBatch(
+    runIds: readonly string[],
+    rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
+  ): void;
   signal?: AbortSignal;
 }): Promise<boolean> {
   if (params.signal?.aborted) {
     return false;
   }
-  const completeBatch = (runIds: readonly string[], rearmGeneration?: number): void => {
-    if (rearmGeneration === undefined) {
-      params.completeBatch(runIds);
-      return;
-    }
-    params.completeBatch(runIds, rearmGeneration);
-  };
+  const completeBatch = (
+    runIds: readonly string[],
+    rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
+  ): void => params.completeBatch(runIds, rearmGeneration, resolution);
   const requesterSessionKey = params.requesterSessionKey.trim();
   const initialState = params.settledEntry.requesterSettleWake;
   if (!requesterSessionKey || !initialState) {
@@ -265,6 +276,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
     completeRequesterSettleWakeBatch({
       runIds: batchRunIds,
       state: selectedState,
+      resolution: { status: "unchanged" },
       completeBatch,
     });
     return false;
@@ -275,6 +287,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
     completeRequesterSettleWakeBatch({
       runIds: batchRunIds,
       state: selectedState,
+      resolution: {
+        status: hasUndeliveredRequiredCompletion ? "failed" : "unchanged",
+        ...(hasUndeliveredRequiredCompletion ? { error: "requester session unavailable" } : {}),
+      },
       completeBatch,
     });
     return false;
@@ -339,6 +355,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         completeRequesterSettleWakeBatch({
           runIds: batchRunIds,
           state,
+          resolution: {
+            status: "failed",
+            error: state.lastError ?? "requester settle wake retry limit reached",
+          },
           completeBatch,
         });
         return false;
@@ -389,6 +409,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         completeRequesterSettleWakeBatch({
           runIds: batchRunIds,
           state,
+          resolution: { status: "failed", error: lastError },
           completeBatch,
         });
         return false;
@@ -415,6 +436,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       completeRequesterSettleWakeBatch({
         runIds: batchRunIds,
         state,
+        resolution: { status: "delivered" },
         completeBatch,
       });
       return true;
@@ -423,6 +445,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       completeRequesterSettleWakeBatch({
         runIds: batchRunIds,
         state,
+        resolution: {
+          status: "failed",
+          error: delivery.error ?? delivery.reason ?? "requester settle wake failed",
+        },
         completeBatch,
       });
       return false;
@@ -434,6 +460,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       completeRequesterSettleWakeBatch({
         runIds: batchRunIds,
         state,
+        resolution: {
+          status: "failed",
+          error: delivery.error ?? delivery.reason ?? "requester settle wake retry limit reached",
+        },
         completeBatch,
       });
       return false;

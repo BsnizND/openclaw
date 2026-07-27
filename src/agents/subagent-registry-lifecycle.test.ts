@@ -37,6 +37,7 @@ function waitForLifecycleState<T>(assertion: () => T | Promise<T>): Promise<T> {
 const taskExecutorMocks = vi.hoisted(() => ({
   completeTaskRunByRunId: vi.fn(),
   failTaskRunByRunId: vi.fn(),
+  finalizeTaskRunByRunId: vi.fn(),
   setDetachedTaskDeliveryStatusByRunId: vi.fn(),
 }));
 
@@ -69,6 +70,7 @@ const bundleMcpRuntimeMocks = vi.hoisted(() => ({
 vi.mock("../tasks/detached-task-runtime.js", () => ({
   completeTaskRunByRunId: taskExecutorMocks.completeTaskRunByRunId,
   failTaskRunByRunId: taskExecutorMocks.failTaskRunByRunId,
+  finalizeTaskRunByRunId: taskExecutorMocks.finalizeTaskRunByRunId,
   setDetachedTaskDeliveryStatusByRunId: taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId,
 }));
 
@@ -311,6 +313,7 @@ describe("subagent registry lifecycle hardening", () => {
     vi.clearAllMocks();
     taskExecutorMocks.completeTaskRunByRunId.mockReset();
     taskExecutorMocks.failTaskRunByRunId.mockReset();
+    taskExecutorMocks.finalizeTaskRunByRunId.mockReset();
     taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId.mockReset();
     gatewayMocks.callGateway.mockReset();
     gatewayMocks.callGateway.mockResolvedValue({});
@@ -3705,6 +3708,144 @@ describe("requester settle wake trigger", () => {
         settledEntry: entry,
       }),
     );
+  });
+
+  it("lets a yielded requester settle own task delivery until the native wake succeeds", async () => {
+    const wakeGate = Promise.withResolvers<void>();
+    const entry = createRunEntry({
+      runId: "run-yield-settle-success",
+      childSessionKey: "agent:main:subagent:yield-settle-success",
+      endedAt: 4_000,
+      requesterTurnRunId: "run-requester",
+      requesterTurnYielded: true,
+      expectsCompletionMessage: true,
+      cleanup: "keep",
+      endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
+      completion: { required: true, resultText: "final answer" },
+      delivery: { status: "pending", lastError: "direct announce failed" },
+      outcome: { status: "ok" },
+    });
+    const settleWake = vi.fn(
+      async (
+        params: Parameters<
+          LifecycleControllerParams["maybeWakeRequesterAfterAllChildrenSettled"]
+        >[0],
+      ) => {
+        await wakeGate.promise;
+        params.completeBatch([entry.runId], undefined, { status: "delivered" });
+        return true;
+      },
+    );
+    const controller = createLifecycleController({
+      entry,
+      maybeWakeRequesterAfterAllChildrenSettled: settleWake,
+    });
+
+    await controller.finalizeResumedAnnounceGiveUp({
+      runId: entry.runId,
+      entry,
+      reason: "retry-limit",
+    });
+
+    expect(entry.delivery?.status).toBe("suspended");
+    expect(hasDeliveredTaskStatusUpdate(entry.runId)).toBe(false);
+    expect(
+      taskExecutorMocks.completeTaskRunByRunId.mock.calls.some(
+        ([arg]) => (arg as { runId?: unknown } | undefined)?.runId === entry.runId,
+      ),
+    ).toBe(false);
+
+    wakeGate.resolve();
+    await waitForLifecycleState(() => expect(entry.delivery?.status).toBe("delivered"));
+
+    expectFields(
+      findCallArg(
+        taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId,
+        (arg) => arg.runId === entry.runId,
+      ),
+      {
+        runId: entry.runId,
+        runtime: "subagent",
+        sessionKey: entry.childSessionKey,
+        deliveryStatus: "delivered",
+      },
+    );
+    expectFields(
+      findCallArg(taskExecutorMocks.finalizeTaskRunByRunId, (arg) => arg.runId === entry.runId),
+      {
+        runId: entry.runId,
+        runtime: "subagent",
+        sessionKey: entry.childSessionKey,
+        status: "succeeded",
+        clearError: true,
+        progressSummary: "final answer",
+      },
+    );
+    expect(entry.requesterSettleWake).toBeUndefined();
+  });
+
+  it("marks a yielded requester task blocked only after the native wake terminally fails", async () => {
+    const entry = createRunEntry({
+      runId: "run-yield-settle-failure",
+      childSessionKey: "agent:main:subagent:yield-settle-failure",
+      endedAt: 4_000,
+      requesterTurnRunId: "run-requester",
+      requesterTurnYielded: true,
+      expectsCompletionMessage: true,
+      cleanup: "keep",
+      endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
+      completion: { required: true, resultText: "final answer" },
+      delivery: { status: "pending", lastError: "direct announce failed" },
+      outcome: { status: "ok" },
+    });
+    const settleWake = vi.fn(
+      async (
+        params: Parameters<
+          LifecycleControllerParams["maybeWakeRequesterAfterAllChildrenSettled"]
+        >[0],
+      ) => {
+        params.completeBatch([entry.runId], undefined, {
+          status: "failed",
+          error: "requester session unavailable",
+        });
+        return false;
+      },
+    );
+    const controller = createLifecycleController({
+      entry,
+      maybeWakeRequesterAfterAllChildrenSettled: settleWake,
+    });
+
+    await controller.finalizeResumedAnnounceGiveUp({
+      runId: entry.runId,
+      entry,
+      reason: "retry-limit",
+    });
+    await waitForLifecycleState(() => expect(entry.delivery?.status).toBe("failed"));
+
+    expectFields(
+      findCallArg(
+        taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId,
+        (arg) => arg.runId === entry.runId,
+      ),
+      {
+        deliveryStatus: "failed",
+        error: "requester session unavailable",
+      },
+    );
+    expectFields(
+      findCallArg(taskExecutorMocks.completeTaskRunByRunId, (arg) => arg.runId === entry.runId),
+      {
+        terminalOutcome: "blocked",
+        terminalSummary:
+          "Required completion delivery failed before reaching the requester: requester session unavailable.",
+      },
+    );
+    expect(
+      taskExecutorMocks.finalizeTaskRunByRunId.mock.calls.some(
+        ([arg]) => (arg as { runId?: unknown } | undefined)?.runId === entry.runId,
+      ),
+    ).toBe(false);
   });
 
   it("fires the settle wake exactly once for a non-suspending announce give-up", async () => {
