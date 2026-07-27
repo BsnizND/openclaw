@@ -54,7 +54,9 @@ type UpdateMetadataMemoryWikiMutation = {
   status?: string;
 };
 
-type ApplyMemoryWikiMutation = CreateSynthesisMemoryWikiMutation | UpdateMetadataMemoryWikiMutation;
+export type ApplyMemoryWikiMutation =
+  | CreateSynthesisMemoryWikiMutation
+  | UpdateMetadataMemoryWikiMutation;
 
 type MemoryWikiMutationInputOp = ApplyMemoryWikiMutation["op"] | "synthesis" | "metadata";
 
@@ -63,6 +65,12 @@ type ApplyMemoryWikiMutationResult = {
   operation: ApplyMemoryWikiMutation["op"];
   pagePath: string;
   pageId?: string;
+  compile?: CompileMemoryWikiResult;
+};
+
+export type ApplyMemoryWikiMutationsResult = {
+  changed: boolean;
+  results: Array<Omit<ApplyMemoryWikiMutationResult, "compile">>;
   compile?: CompileMemoryWikiResult;
 };
 
@@ -375,16 +383,7 @@ async function applyMemoryWikiMutationUnlocked(params: {
   mutation: ApplyMemoryWikiMutation;
 }): Promise<ApplyMemoryWikiMutationResult> {
   await ensureMemoryWikiVaultScaffold(params.config);
-  const result =
-    params.mutation.op === "create_synthesis"
-      ? await applyCreateSynthesisMutation({
-          config: params.config,
-          mutation: params.mutation,
-        })
-      : await applyUpdateMetadataMutation({
-          config: params.config,
-          mutation: params.mutation,
-        });
+  const result = await applyMemoryWikiPageMutation(params);
   const compile = result.changed ? await compileMemoryWikiVault(params.config) : undefined;
   return {
     changed: result.changed,
@@ -395,6 +394,28 @@ async function applyMemoryWikiMutationUnlocked(params: {
   };
 }
 
+async function applyMemoryWikiPageMutation(params: {
+  config: ResolvedMemoryWikiConfig;
+  mutation: ApplyMemoryWikiMutation;
+}): Promise<Omit<ApplyMemoryWikiMutationResult, "compile">> {
+  const result =
+    params.mutation.op === "create_synthesis"
+      ? await applyCreateSynthesisMutation({
+          config: params.config,
+          mutation: params.mutation,
+        })
+      : await applyUpdateMetadataMutation({
+          config: params.config,
+          mutation: params.mutation,
+        });
+  return {
+    changed: result.changed,
+    operation: params.mutation.op,
+    pagePath: result.pagePath,
+    ...(result.pageId ? { pageId: result.pageId } : {}),
+  };
+}
+
 export async function applyMemoryWikiMutation(params: {
   config: ResolvedMemoryWikiConfig;
   mutation: ApplyMemoryWikiMutation;
@@ -402,4 +423,32 @@ export async function applyMemoryWikiMutation(params: {
   return await withMemoryWikiVaultMutation(params.config.vault.path, () =>
     applyMemoryWikiMutationUnlocked(params),
   );
+}
+
+export async function applyMemoryWikiMutations(params: {
+  config: ResolvedMemoryWikiConfig;
+  mutations: ApplyMemoryWikiMutation[];
+}): Promise<ApplyMemoryWikiMutationsResult> {
+  if (params.mutations.length === 0) {
+    throw new Error("wiki mutation batch requires at least one mutation.");
+  }
+  return await withMemoryWikiVaultMutation(params.config.vault.path, async () => {
+    await ensureMemoryWikiVaultScaffold(params.config);
+    const results: ApplyMemoryWikiMutationsResult["results"] = [];
+    for (const mutation of params.mutations) {
+      results.push(
+        await applyMemoryWikiPageMutation({
+          config: params.config,
+          mutation,
+        }),
+      );
+    }
+    const changed = results.some((result) => result.changed);
+    const compile = changed ? await compileMemoryWikiVault(params.config) : undefined;
+    return {
+      changed,
+      results,
+      ...(compile ? { compile } : {}),
+    };
+  });
 }

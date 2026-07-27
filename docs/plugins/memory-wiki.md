@@ -496,6 +496,12 @@ See [CLI: wiki](/cli/wiki) for the full command reference, including
 `wiki chatgpt import` / `wiki chatgpt rollback`, and the full `wiki obsidian`
 subcommand set.
 
+Gateway callers may send one mutation directly to `wiki.apply` or send a
+non-empty `{ mutations: [...] }` batch. Batched mutations retain input order,
+share one vault mutation lock, and compile the resulting vault state once;
+callers should still verify each returned page through exact `wiki.get`
+readback.
+
 ## Obsidian support
 
 When `vault.renderMode` is `obsidian`, the plugin writes Obsidian-friendly
