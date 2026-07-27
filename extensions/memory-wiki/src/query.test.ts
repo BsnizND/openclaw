@@ -488,7 +488,7 @@ describe("searchMemoryWiki", () => {
             },
             {
               id: "claim.all-well.energy",
-              text: "Brian may be exhausted after a demanding day.",
+              text: "Brian may be tired after a demanding day.",
               status: "supported",
               evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
             },
@@ -510,6 +510,30 @@ describe("searchMemoryWiki", () => {
       }),
       "utf8",
     );
+    await fs.writeFile(
+      path.join(rootDir, "reports", "operational-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "report",
+          id: "report.operational-shadow",
+          title: "All Well exhausted low-effort operational report",
+        },
+        body: "# Operational report\n\nThis is not durable semantic memory.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "concepts", "one-token-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "concept",
+          id: "concept.one-token-shadow",
+          title: "All Well",
+        },
+        body: "# All Well\n\nA generic one-token overlap is not enough.\n",
+      }),
+      "utf8",
+    );
     await compileMemoryWikiVault(config);
     const readFile = vi.spyOn(fs, "readFile");
 
@@ -521,10 +545,16 @@ describe("searchMemoryWiki", () => {
 
     expect(results[0]?.path).toBe("syntheses/all-well.md");
     expect(results.map((result) => result.path)).toContain("syntheses/all-well.md");
+    expect(results.map((result) => result.path)).not.toContain("concepts/one-token-shadow.md");
     expect(results.map((result) => result.path)).not.toContain("sources/raw-shadow.md");
     expect(
       readFile.mock.calls.some(
         ([file]) => typeof file === "string" && file.endsWith("sources/raw-shadow.md"),
+      ),
+    ).toBe(false);
+    expect(
+      readFile.mock.calls.some(
+        ([file]) => typeof file === "string" && file.endsWith("reports/operational-shadow.md"),
       ),
     ).toBe(false);
     readFile.mockRestore();
@@ -550,7 +580,7 @@ describe("searchMemoryWiki", () => {
             },
             {
               id: "claim.all-well.energy",
-              text: "Brian may be exhausted after a demanding day.",
+              text: "Brian may be tired after a demanding day.",
               status: "supported",
               evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
             },
