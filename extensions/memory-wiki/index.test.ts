@@ -170,6 +170,66 @@ describe("memory-wiki plugin", () => {
     });
   });
 
+  it("rebinds a committed cache without scanning source pages at startup", async () => {
+    const rootDir = await createTempDir("memory-wiki-index-startup-cache-");
+    const { api, registerService } = createPluginApi();
+    api.pluginConfig = { vault: { path: rootDir } };
+    plugin.register(api);
+    const config = resolveMemoryWikiConfig(api.pluginConfig);
+    await fs.mkdir(path.join(rootDir, ".openclaw-wiki"), { recursive: true });
+    await fs.mkdir(path.join(rootDir, "sources"), { recursive: true });
+    await fs.writeFile(path.join(rootDir, ".openclaw-wiki", "log.jsonl"), "", "utf8");
+    await fs.writeFile(
+      path.join(rootDir, "sources", "large-source.md"),
+      "# Raw evidence\n",
+      "utf8",
+    );
+    const service = registerService.mock.calls[0]?.[0];
+    await service?.start?.();
+
+    const snapshot: MemoryWikiCompiledCacheSnapshot = {
+      digest: { claimCount: 0, contradictionCount: 0, pages: [] },
+      claims: [],
+    };
+    const publicationId = createMemoryWikiCompiledCachePublicationId();
+    const reservationId = createMemoryWikiCompiledCachePublicationId();
+    const parentPublicationId = (await loadMemoryWikiVaultIdentity(rootDir))
+      .compiledCachePublicationId;
+    await appendMemoryWikiLog(rootDir, {
+      type: "compile",
+      timestamp: "2026-07-17T00:00:00.000Z",
+      details: { compiledCacheReservationId: reservationId },
+    });
+    const sourceGeneration = await resolveMemoryWikiVaultSourceGeneration(rootDir);
+    await appendMemoryWikiLog(rootDir, {
+      type: "compile",
+      timestamp: "2026-07-17T00:00:00.000Z",
+      details: {
+        compiledCachePublicationId: publicationId,
+        compiledCacheParentPublicationId: parentPublicationId,
+        compiledCacheReservationId: reservationId,
+        compiledCacheSourceGeneration: sourceGeneration,
+      },
+    });
+    await writeMemoryWikiCompiledCache(
+      config,
+      snapshot,
+      resolveMemoryWikiCompiledCacheGeneration(snapshot),
+      publicationId,
+      parentPublicationId,
+      async () => {},
+      async () => {},
+      () => loadMemoryWikiValidatedVaultIdentity(rootDir),
+    );
+
+    const readdir = vi.spyOn(fs, "readdir");
+    await service?.start?.();
+
+    expect(readdir).not.toHaveBeenCalled();
+    await expect(loadMemoryWikiCompiledCache(config)).resolves.toEqual(snapshot);
+    readdir.mockRestore();
+  });
+
   it("clears active owners before a fallible lifecycle identity refresh", async () => {
     const rootDir = await createTempDir("memory-wiki-index-refresh-failure-");
     const { api, registerService } = createPluginApi();
