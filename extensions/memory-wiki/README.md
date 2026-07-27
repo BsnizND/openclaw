@@ -224,6 +224,12 @@ Write methods:
 - `wiki.obsidian.command`
 - `wiki.obsidian.daily`
 
+`wiki.apply` accepts either one mutation object or `{ mutations: [...] }`.
+A non-empty mutation batch runs under one vault mutation lock and compiles the
+resulting vault state once after all changed pages are written. Each result
+preserves the input order so callers can perform exact `wiki.get` readback per
+page.
+
 For agent-scoped vaults, pass `agentId` to vault-backed RPC methods. Missing or
 unknown ids fail in multi-agent setups.
 
