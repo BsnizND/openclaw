@@ -55,6 +55,7 @@ describe("reserved index.md filename collision (repro)", () => {
       config,
       query: "Unique ingest content sentinel ZZZ",
       maxResults: 10,
+      mode: "source-evidence",
     });
     expect(found.some((hit) => hit.path === result.pagePath)).toBe(true);
     expect(result.pageId).toBe("source.index");
