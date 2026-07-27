@@ -24,7 +24,7 @@ import {
   resolveQueryableWikiPageByLookup,
   type QueryableWikiPage,
 } from "./query.js";
-import { initializeMemoryWikiVault } from "./vault.js";
+import { ensureMemoryWikiVaultScaffold } from "./vault.js";
 
 const GENERATED_START = "<!-- openclaw:wiki:generated:start -->";
 const GENERATED_END = "<!-- openclaw:wiki:generated:end -->";
@@ -63,7 +63,7 @@ type ApplyMemoryWikiMutationResult = {
   operation: ApplyMemoryWikiMutation["op"];
   pagePath: string;
   pageId?: string;
-  compile: CompileMemoryWikiResult;
+  compile?: CompileMemoryWikiResult;
 };
 
 function normalizeMutationConfidence(
@@ -216,18 +216,30 @@ async function writeWikiPage(params: {
   relativePath: string;
   frontmatter: Record<string, unknown>;
   body: string;
+  touchUpdatedAt?: boolean;
 }): Promise<boolean> {
   const root = await fsRoot(params.rootDir);
-  const rendered = withTrailingNewline(
+  const renderedWithoutTouch = withTrailingNewline(
     renderWikiMarkdown({
       frontmatter: params.frontmatter,
       body: params.body,
     }),
   );
   const existing = await readExistingWikiPage(root, params.relativePath);
-  if (existing === rendered) {
+  if (existing === renderedWithoutTouch) {
     return false;
   }
+  const rendered = params.touchUpdatedAt
+    ? withTrailingNewline(
+        renderWikiMarkdown({
+          frontmatter: {
+            ...params.frontmatter,
+            updatedAt: new Date().toISOString(),
+          },
+          body: params.body,
+        }),
+      )
+    : renderedWithoutTouch;
   await root.write(params.relativePath, rendered);
   return true;
 }
@@ -273,13 +285,13 @@ async function applyCreateSynthesisMutation(params: {
         ? { confidence: params.mutation.confidence }
         : {}),
       status: params.mutation.status?.trim() || "active",
-      updatedAt: new Date().toISOString(),
     },
     body: buildSynthesisBody({
       title: params.mutation.title,
       originalBody: parsed.body,
       generatedBody: params.mutation.body.trim(),
     }),
+    touchUpdatedAt: true,
   });
   return { changed, pagePath, pageId };
 }
@@ -290,7 +302,6 @@ function buildUpdatedFrontmatter(params: {
 }): Record<string, unknown> {
   const frontmatter: Record<string, unknown> = {
     ...params.original,
-    updatedAt: new Date().toISOString(),
   };
   if (params.mutation.sourceIds) {
     frontmatter.sourceIds = normalizeSourceIds(params.mutation.sourceIds);
@@ -350,6 +361,7 @@ async function applyUpdateMetadataMutation(params: {
       mutation: params.mutation,
     }),
     body: parsed.body,
+    touchUpdatedAt: true,
   });
   return {
     changed,
@@ -362,7 +374,7 @@ async function applyMemoryWikiMutationUnlocked(params: {
   config: ResolvedMemoryWikiConfig;
   mutation: ApplyMemoryWikiMutation;
 }): Promise<ApplyMemoryWikiMutationResult> {
-  await initializeMemoryWikiVault(params.config);
+  await ensureMemoryWikiVaultScaffold(params.config);
   const result =
     params.mutation.op === "create_synthesis"
       ? await applyCreateSynthesisMutation({
@@ -373,13 +385,13 @@ async function applyMemoryWikiMutationUnlocked(params: {
           config: params.config,
           mutation: params.mutation,
         });
-  const compile = await compileMemoryWikiVault(params.config);
+  const compile = result.changed ? await compileMemoryWikiVault(params.config) : undefined;
   return {
     changed: result.changed,
     operation: params.mutation.op,
     pagePath: result.pagePath,
     ...(result.pageId ? { pageId: result.pageId } : {}),
-    compile,
+    ...(compile ? { compile } : {}),
   };
 }
 

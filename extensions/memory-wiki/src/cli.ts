@@ -391,7 +391,12 @@ function formatMemoryWikiMutationSummary(result: MemoryWikiMutationResult, json?
   if (json) {
     return JSON.stringify(result, null, 2);
   }
-  return `${result.changed ? "Updated" : "No changes for"} ${result.pagePath} via ${result.operation}. ${result.compile.updatedFiles.length > 0 ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.` : "Indexes unchanged."}`;
+  const compileSummary = result.compile
+    ? result.compile.updatedFiles.length > 0
+      ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.`
+      : "Indexes unchanged."
+    : "Indexes already current.";
+  return `${result.changed ? "Updated" : "No changes for"} ${result.pagePath} via ${result.operation}. ${compileSummary}`;
 }
 
 function formatJsonOrText<T>(
