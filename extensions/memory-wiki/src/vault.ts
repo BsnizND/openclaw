@@ -104,7 +104,7 @@ async function writeFileIfMissing(
   createdFiles.push(path.join(rootDir, relativePath));
 }
 
-export async function initializeMemoryWikiVault(
+export async function ensureMemoryWikiVaultScaffold(
   config: ResolvedMemoryWikiConfig,
   options?: { nowMs?: number },
 ): Promise<InitializeMemoryWikiVaultResult> {
@@ -156,16 +156,7 @@ export async function initializeMemoryWikiVault(
       },
     });
   }
-  const vaultGeneration = await ensureMemoryWikiVaultGeneration(rootDir);
-  const identity = await loadMemoryWikiValidatedVaultIdentity(rootDir);
-  activateMemoryWikiCompiledCacheOwner(
-    config,
-    vaultGeneration,
-    identity.compiledCachePublicationId,
-  );
-  await reconcileMemoryWikiCompiledCacheOwner(config, () =>
-    loadMemoryWikiValidatedVaultIdentity(rootDir),
-  );
+  await ensureMemoryWikiVaultGeneration(rootDir);
 
   return {
     rootDir,
@@ -173,4 +164,25 @@ export async function initializeMemoryWikiVault(
     createdDirectories,
     createdFiles,
   };
+}
+
+export async function initializeMemoryWikiVault(
+  config: ResolvedMemoryWikiConfig,
+  options?: { nowMs?: number },
+): Promise<InitializeMemoryWikiVaultResult> {
+  const result = await ensureMemoryWikiVaultScaffold(config, options);
+  const identity = await loadMemoryWikiValidatedVaultIdentity(result.rootDir);
+  if (!identity.vaultGeneration) {
+    throw new Error(`Memory Wiki vault generation is missing: ${result.rootDir}`);
+  }
+  activateMemoryWikiCompiledCacheOwner(
+    config,
+    identity.vaultGeneration,
+    identity.compiledCachePublicationId,
+  );
+  await reconcileMemoryWikiCompiledCacheOwner(config, () =>
+    loadMemoryWikiValidatedVaultIdentity(result.rootDir),
+  );
+
+  return result;
 }

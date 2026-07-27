@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
-import { initializeMemoryWikiVault } from "./vault.js";
+import { ensureMemoryWikiVaultScaffold, initializeMemoryWikiVault } from "./vault.js";
 
 const { createVault } = createMemoryWikiTestHarness();
 
@@ -60,5 +60,16 @@ describe("initializeMemoryWikiVault", () => {
     expect(second.created).toBe(false);
     expect(second.createdDirectories).toHaveLength(0);
     expect(second.createdFiles).toHaveLength(0);
+  });
+
+  it("ensures the read scaffold without preparing the compiled-cache owner", async () => {
+    const { config } = await createVault({
+      prefix: "memory-wiki-",
+    });
+
+    const result = await ensureMemoryWikiVaultScaffold(config);
+
+    expect(result.created).toBe(true);
+    await expect(fs.access(path.join(config.vault.path, "index.md"))).resolves.toBeUndefined();
   });
 });

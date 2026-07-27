@@ -172,6 +172,43 @@ function createMemoryManager(overrides?: {
 }
 
 describe("getMemoryWikiPage", () => {
+  it("reads an exact compiled page without scanning the vault", async () => {
+    const { rootDir, config } = await createQueryVault({ initialize: true });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "media-timeline.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "media-timeline",
+          title: "Media Timeline",
+        },
+        body: "# Media Timeline\n\nCurrent projection.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "unrelated.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.unrelated",
+          title: "Unrelated",
+        },
+        body: "# Unrelated\n\nMust not be read.\n",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+    const readdir = vi.spyOn(fs, "readdir");
+
+    await expect(getMemoryWikiPage({ config, lookup: "media-timeline" })).resolves.toMatchObject({
+      path: "syntheses/media-timeline.md",
+      title: "Media Timeline",
+      content: expect.stringContaining("Current projection."),
+    });
+    expect(readdir).not.toHaveBeenCalled();
+  });
+
   it("enforces visibility for all current session storage layouts", async () => {
     const { config } = await createQueryVault({
       initialize: true,
