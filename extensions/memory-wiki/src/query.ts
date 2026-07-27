@@ -37,7 +37,7 @@ import {
 import { ensureMemoryWikiVaultScaffold } from "./vault.js";
 
 const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
-const SEMANTIC_QUERY_DIRS = ["entities", "concepts", "syntheses", "reports"] as const;
+const SEMANTIC_QUERY_DIRS = ["entities", "concepts", "syntheses"] as const;
 const QUERY_PAGE_READ_CONCURRENCY = 16;
 const RELATED_BLOCK_PATTERN =
   /<!-- openclaw:wiki:related:start -->[\s\S]*?<!-- openclaw:wiki:related:end -->/g;
@@ -361,6 +361,18 @@ function buildRouteQuestionTokens(queryLower: string): string[] {
   return routedTokens.length > 0 ? routedTokens : tokens;
 }
 
+function countMatchingQueryTokens(searchText: string, queryTokens: readonly string[]): number {
+  return queryTokens.filter((token) => searchText.includes(token)).length;
+}
+
+function hasStrongQueryTokenCoverage(searchText: string, queryTokens: readonly string[]): boolean {
+  if (queryTokens.length < 2) {
+    return false;
+  }
+  const requiredMatches = Math.max(2, Math.ceil(queryTokens.length * 0.7));
+  return countMatchingQueryTokens(searchText, queryTokens) >= requiredMatches;
+}
+
 function lineMatchesQuery(lineLower: string, queryLower: string, queryTokens: string[]): boolean {
   if (queryLower.length > 0 && lineLower.includes(queryLower)) {
     return true;
@@ -421,7 +433,14 @@ function isClaimTextOrIdMatch(
   if (lineMatchesQuery(textLower, queryLower, [...queryTokens])) {
     return true;
   }
-  return lineMatchesQuery(normalizeLowercaseStringOrEmpty(claim.id), queryLower, [...queryTokens]);
+  if (hasStrongQueryTokenCoverage(textLower, queryTokens)) {
+    return true;
+  }
+  const idLower = normalizeLowercaseStringOrEmpty(claim.id);
+  return (
+    lineMatchesQuery(idLower, queryLower, [...queryTokens]) ||
+    hasStrongQueryTokenCoverage(idLower, queryTokens)
+  );
 }
 
 function scoreClaimMatch(params: {
@@ -443,6 +462,11 @@ function scoreClaimMatch(params: {
     )
   ) {
     score += 18;
+  } else if (
+    params.queryTokens?.length &&
+    hasStrongQueryTokenCoverage(normalizeLowercaseStringOrEmpty(params.text), params.queryTokens)
+  ) {
+    score += 14;
   }
   if (normalizeLowercaseStringOrEmpty(params.id).includes(params.queryLower)) {
     score += 10;
@@ -856,10 +880,11 @@ function scorePage(page: QueryableWikiPage, query: string, mode: WikiSearchMode)
     rawLower.includes(queryLower);
   const hasAllTokens =
     queryTokens.length > 0 && queryTokens.every((token) => combinedLower.includes(token));
+  const hasStrongTokenCoverage = hasStrongQueryTokenCoverage(combinedLower, queryTokens);
   const hasModeMatch =
     mode === "route-question" &&
     hasRouteQuestionMatch(buildPageRouteQuestionFields(page), queryLower);
-  if (!hasExactMatch && !hasAllTokens && !hasModeMatch) {
+  if (!hasExactMatch && !hasAllTokens && !hasStrongTokenCoverage && !hasModeMatch) {
     return 0;
   }
 
