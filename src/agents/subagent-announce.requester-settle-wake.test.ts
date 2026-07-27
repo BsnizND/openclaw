@@ -372,6 +372,42 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(completeBatchSpy).toHaveBeenCalledWith(["run-cron"], 1);
   });
 
+  it("resumes a run-scoped cron requester through its native base session", async () => {
+    const cronBaseRequester = "agent:main:cron:daily-report";
+    const cronRunRequester = `${cronBaseRequester}:run:sess-cron`;
+    sessionStore = { [cronBaseRequester]: { sessionId: "sess-cron" } };
+    const child = makeSettledChild({
+      runId: "run-cron-scoped",
+      requesterSessionKey: cronRunRequester,
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds: ["run-cron-scoped"],
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      },
+    });
+    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+
+    const woke = await maybeWakeRequesterAfterAllChildrenSettled(
+      wakeParams({ requesterSessionKey: cronRunRequester, settledEntry: child }),
+    );
+
+    expect(woke).toBe(true);
+    expect(deliverSpy).toHaveBeenCalledOnce();
+    expect(deliveredCallArg().requesterSessionKey).toBe(cronBaseRequester);
+    expect(deliveredCallArg().targetRequesterSessionKey).toBe(cronBaseRequester);
+    expect(deliveredCallArg().directIdempotencyKey).toBe(
+      `announce:requester-settle:${cronRunRequester}:run-cron-scoped:yield-1`,
+    );
+    expect(registryRuntimeMock.listSubagentRunsForRequester).toHaveBeenCalledWith(cronRunRequester);
+    expect(registryRuntimeMock.hasDescendantRunAwaitingSettle).toHaveBeenCalledWith(
+      cronRunRequester,
+      "run-cron-scoped",
+    );
+    expect(completeBatchSpy).toHaveBeenCalledWith(["run-cron-scoped"], 1);
+  });
+
   it("skips requesters whose session entry is gone", async () => {
     sessionStore = {};
     // A qualifying drained wave, so the missing session entry is what rejects.

@@ -6,7 +6,7 @@
  */
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { logWarn } from "../logger.js";
-import { isCronSessionKey } from "../sessions/session-key-utils.js";
+import { isCronSessionKey, parseCronRunScopeSuffix } from "../sessions/session-key-utils.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
@@ -197,6 +197,11 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
   if (!requesterSessionKey || !initialState) {
     return false;
   }
+  // Registry ownership and idempotency remain scoped to the exact isolated
+  // cron run. The resumable requester transcript, however, is owned by the
+  // cache-stable base cron session.
+  const requesterDeliverySessionKey =
+    parseCronRunScopeSuffix(requesterSessionKey).baseSessionKey ?? requesterSessionKey;
 
   const registryRuntime = await requesterSettleWakeDeps.loadSubagentRegistryRuntime();
   const listedRuns = registryRuntime.listSubagentRunsForRequester(requesterSessionKey);
@@ -265,7 +270,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
     return false;
   }
 
-  const { entry: requesterEntry } = loadRequesterSessionEntry(requesterSessionKey);
+  const { entry: requesterEntry } = loadRequesterSessionEntry(requesterDeliverySessionKey);
   if (!hasUsableSessionEntry(requesterEntry)) {
     completeRequesterSettleWakeBatch({
       runIds: batchRunIds,
@@ -353,7 +358,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
     let delivery: Awaited<ReturnType<typeof deliverSubagentAnnouncement>>;
     try {
       delivery = await deliverSubagentAnnouncement({
-        requesterSessionKey,
+        requesterSessionKey: requesterDeliverySessionKey,
         triggerMessage: wakeMessage,
         steerMessage: wakeMessage,
         summaryLine: "all spawned subagents settled",
@@ -363,7 +368,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         sourceSessionKey: currentSettledEntry.childSessionKey,
         sourceChannel: INTERNAL_MESSAGE_CHANNEL,
         sourceTool: "subagent_announce",
-        targetRequesterSessionKey: requesterSessionKey,
+        targetRequesterSessionKey: requesterDeliverySessionKey,
         requesterIsSubagent: false,
         expectsCompletionMessage: false,
         directIdempotencyKey: buildAnnounceIdempotencyKey(
