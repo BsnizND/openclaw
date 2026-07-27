@@ -736,8 +736,11 @@ function buildDigestCandidatePaths(params: {
       const metadataLower = normalizeLowercaseStringOrEmpty(
         buildDigestPageSearchText(page, claims),
       );
+      const hasAllTokens =
+        queryTokens.length > 0 && queryTokens.every((token) => metadataLower.includes(token));
       if (
         !metadataLower.includes(queryLower) &&
+        !hasAllTokens &&
         !(
           params.mode === "route-question" &&
           hasRouteQuestionMatch(buildDigestRouteQuestionFields(page), queryLower)
@@ -1371,7 +1374,14 @@ async function searchWikiCorpus(params: {
   const results = candidatePages
     .map((page) => toWikiSearchResult(page, params.query, params.mode))
     .filter((page) => page.score > 0);
-  if (candidatePaths.length === 0 || results.length >= params.maxResults) {
+  // A matching compiled candidate is a complete bounded answer for the indexed
+  // metadata and claims. Only source-evidence mode needs to keep scanning for
+  // source-body evidence that is intentionally absent from the digest.
+  if (
+    candidatePaths.length === 0 ||
+    (results.length > 0 && params.mode !== "source-evidence") ||
+    results.length >= params.maxResults
+  ) {
     return results;
   }
 
