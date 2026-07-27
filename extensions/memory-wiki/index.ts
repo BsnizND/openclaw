@@ -24,10 +24,7 @@ import {
   configureMemoryWikiImportRunStateStore,
   createMemoryWikiImportRunStateStore,
 } from "./src/import-runs-state.js";
-import {
-  ensureMemoryWikiVaultGeneration,
-  loadMemoryWikiValidatedVaultIdentity,
-} from "./src/log.js";
+import { ensureMemoryWikiVaultGeneration, loadMemoryWikiVaultIdentity } from "./src/log.js";
 import {
   createWikiPromptSectionBuilder,
   createWikiPromptSectionPreparer,
@@ -48,7 +45,7 @@ async function loadConfiguredVaultIdentity(vaultRoot: string): Promise<{
   vaultGeneration: string;
   compiledCachePublicationId: string | null;
 } | null> {
-  const identity = await loadMemoryWikiValidatedVaultIdentity(vaultRoot);
+  const identity = await loadMemoryWikiVaultIdentity(vaultRoot);
   if (identity.vaultGeneration) {
     return {
       vaultGeneration: identity.vaultGeneration,
@@ -144,7 +141,10 @@ export default definePluginEntry({
               identity.compiledCachePublicationId,
             );
             await reconcileMemoryWikiCompiledCacheOwner(activeConfig, () =>
-              loadMemoryWikiValidatedVaultIdentity(activeConfig.vault.path),
+              // Native compile/apply validates the complete source generation
+              // before committing this durable identity. Startup rebinds that
+              // committed publication without rehashing the entire raw vault.
+              loadMemoryWikiVaultIdentity(activeConfig.vault.path),
             );
             activeOwnerIds.add(resolveMemoryWikiCompiledCacheOwnerId(activeConfig));
           }
