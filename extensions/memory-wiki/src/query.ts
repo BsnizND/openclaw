@@ -33,7 +33,7 @@ import {
   type WikiClaim,
   type WikiPageSummary,
 } from "./markdown.js";
-import { initializeMemoryWikiVault } from "./vault.js";
+import { ensureMemoryWikiVaultScaffold } from "./vault.js";
 
 const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
 const QUERY_PAGE_READ_CONCURRENCY = 16;
@@ -1393,6 +1393,18 @@ function resolveDigestClaimLookup(digest: QueryDigestBundle, lookup: string): st
   return match?.pagePath ?? null;
 }
 
+function resolveDigestPageLookup(digest: QueryDigestBundle, lookup: string): string | null {
+  const key = normalizeLookupKey(lookup);
+  const withExtension = key.endsWith(".md") ? key : `${key}.md`;
+  const match =
+    digest.pages.find((page) => page.path === key) ??
+    digest.pages.find((page) => page.path === withExtension) ??
+    digest.pages.find((page) => page.path.replace(/\.md$/i, "") === key) ??
+    digest.pages.find((page) => path.basename(page.path, ".md") === key) ??
+    digest.pages.find((page) => page.id === key);
+  return match?.path ?? null;
+}
+
 export function resolveQueryableWikiPageByLookup(
   pages: QueryableWikiPage[],
   lookup: string,
@@ -1430,7 +1442,7 @@ export async function searchMemoryWiki(params: {
     sandboxed: params.sandboxed,
     operation: "wiki_search",
   });
-  await initializeMemoryWikiVault(effectiveConfig);
+  await ensureMemoryWikiVaultScaffold(effectiveConfig);
   const maxResults = normalizePositiveInteger(params.maxResults, 10);
   const mode = params.mode ?? "auto";
 
@@ -1500,16 +1512,19 @@ export async function getMemoryWikiPage(params: {
     sandboxed: params.sandboxed,
     operation: "wiki_get",
   });
-  await initializeMemoryWikiVault(effectiveConfig);
+  await ensureMemoryWikiVaultScaffold(effectiveConfig);
   const fromLine = normalizePositiveInteger(params.fromLine, 1);
   const lineCount = normalizePositiveInteger(params.lineCount, 200);
 
   if (shouldSearchWiki(effectiveConfig)) {
     const digest = await readQueryDigestBundle(effectiveConfig);
-    const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
-    const digestLookupPage = digestClaimPagePath
+    const digestLookupPagePath = digest
+      ? (resolveDigestClaimLookup(digest, params.lookup) ??
+        resolveDigestPageLookup(digest, params.lookup))
+      : null;
+    const digestLookupPage = digestLookupPagePath
       ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
+          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestLookupPagePath])
         )[0] ?? null)
       : null;
     const pages = digestLookupPage
