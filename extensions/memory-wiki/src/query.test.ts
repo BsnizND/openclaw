@@ -211,6 +211,7 @@ describe("getMemoryWikiPage", () => {
       content: expect.stringContaining("Current projection."),
     });
     expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
   });
 
   it("reads an exact compiled page without scanning the vault", async () => {
@@ -248,6 +249,7 @@ describe("getMemoryWikiPage", () => {
       content: expect.stringContaining("Current projection."),
     });
     expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
   });
 
   it("enforces visibility for all current session storage layouts", async () => {
