@@ -37,6 +37,7 @@ import {
 import { ensureMemoryWikiVaultScaffold } from "./vault.js";
 
 const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
+const SEMANTIC_QUERY_DIRS = ["entities", "concepts", "syntheses", "reports"] as const;
 const QUERY_PAGE_READ_CONCURRENCY = 16;
 const RELATED_BLOCK_PATTERN =
   /<!-- openclaw:wiki:related:start -->[\s\S]*?<!-- openclaw:wiki:related:end -->/g;
@@ -1357,19 +1358,26 @@ async function searchWikiCorpus(params: {
 }): Promise<WikiSearchResult[]> {
   const digest = await readQueryDigestBundle(params.config);
   const rootDir = params.config.vault.path;
-  const candidatePaths = digest
+  const digestCandidatePaths = digest
     ? buildDigestCandidatePaths({
         digest,
         query: params.query,
         maxResults: params.maxResults,
         mode: params.mode,
       })
-    : params.mode === "source-evidence"
-      ? []
-      : await listWikiMarkdownFiles(rootDir, ["syntheses"]);
+    : [];
+  const semanticDigestCandidatePaths = digestCandidatePaths.filter(
+    (relativePath) => !relativePath.replace(/\\/g, "/").startsWith("sources/"),
+  );
+  const candidatePaths =
+    params.mode === "source-evidence"
+      ? digestCandidatePaths
+      : semanticDigestCandidatePaths.length > 0
+        ? semanticDigestCandidatePaths
+        : await listWikiMarkdownFiles(rootDir, SEMANTIC_QUERY_DIRS);
   const seenPaths = new Set<string>();
   const candidatePages =
-    candidatePaths.length > 0
+    params.mode !== "source-evidence" || candidatePaths.length > 0
       ? await readQueryableWikiPagesByPaths(rootDir, candidatePaths)
       : await readQueryableWikiPages(rootDir);
   for (const page of candidatePages) {
@@ -1379,14 +1387,10 @@ async function searchWikiCorpus(params: {
   const results = candidatePages
     .map((page) => toWikiSearchResult(page, params.query, params.mode))
     .filter((page) => page.score > 0);
-  // A matching compiled candidate is a complete bounded answer for the indexed
-  // metadata and claims. Only source-evidence mode needs to keep scanning for
-  // source-body evidence that is intentionally absent from the digest.
-  if (
-    candidatePaths.length === 0 ||
-    (results.length > 0 && params.mode !== "source-evidence") ||
-    results.length >= params.maxResults
-  ) {
+  // Ordinary recall is served only from semantic pages. Raw source pages remain
+  // available through the explicit source-evidence mode, but they are not a
+  // shadow semantic fallback when compiled candidates miss.
+  if (params.mode !== "source-evidence" || results.length >= params.maxResults) {
     return results;
   }
 
