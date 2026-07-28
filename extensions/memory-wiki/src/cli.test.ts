@@ -187,7 +187,7 @@ describe("memory-wiki cli", () => {
     const page = await fs.readFile(path.join(rootDir, "syntheses", "cli-alpha.md"), "utf8");
     expect(page).toContain("Alpha from CLI.");
     expect(page).toContain("source.alpha");
-    await expect(fs.readFile(path.join(rootDir, "index.md"), "utf8")).resolves.toContain(
+    await expect(fs.readFile(path.join(rootDir, "index.md"), "utf8")).resolves.not.toContain(
       "[CLI Alpha](syntheses/cli-alpha.md)",
     );
   });

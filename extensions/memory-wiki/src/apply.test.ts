@@ -1,4 +1,5 @@
 // Memory Wiki tests cover apply plugin behavior.
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,8 @@ import {
   applyMemoryWikiMutations,
   normalizeMemoryWikiMutationInput,
 } from "./apply.js";
+import { compileMemoryWikiVault } from "./compile.js";
+import { loadMemoryWikiCompiledCache } from "./compiled-cache.js";
 import { parseWikiMarkdown, renderWikiMarkdown } from "./markdown.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
 
@@ -68,7 +71,19 @@ describe("applyMemoryWikiMutation", () => {
     ).toThrow("confidence must be a finite number");
   });
 
-  it("creates synthesis pages with managed summary blocks and refreshed indexes", async () => {
+  it("requires an exact SHA-256 identity for observed-body replacement", () => {
+    expect(() =>
+      normalizeMemoryWikiMutationInput({
+        op: "create_synthesis",
+        title: "Alpha Synthesis",
+        body: "Alpha summary body.",
+        sourceIds: ["source.alpha"],
+        replaceObservedContentHash: "not-a-hash",
+      }),
+    ).toThrow("requires an exact SHA-256 digest");
+  });
+
+  it("creates synthesis pages without synchronously compiling the vault", async () => {
     const { rootDir, config } = await createVault({ prefix: "memory-wiki-apply-" });
 
     const result = await applyMemoryWikiMutation({
@@ -102,7 +117,7 @@ describe("applyMemoryWikiMutation", () => {
     expect(result.changed).toBe(true);
     expect(result.pagePath).toBe("syntheses/alpha-synthesis.md");
     expect(result.pageId).toBe("synthesis.alpha-synthesis");
-    expect(result.compile?.pageCounts.synthesis).toBe(1);
+    expect(result.compile).toBeUndefined();
 
     const page = await fs.readFile(path.join(rootDir, result.pagePath), "utf8");
     const parsed = parseWikiMarkdown(page);
@@ -142,7 +157,7 @@ describe("applyMemoryWikiMutation", () => {
     expect(parsed.body).toContain("Alpha summary body.");
     expect(parsed.body).toContain("## Notes");
     expect(parsed.body).toContain("<!-- openclaw:human:start -->");
-    await expect(fs.readFile(path.join(rootDir, "index.md"), "utf8")).resolves.toContain(
+    await expect(fs.readFile(path.join(rootDir, "index.md"), "utf8")).resolves.not.toContain(
       "[Alpha Synthesis](syntheses/alpha-synthesis.md)",
     );
   });
@@ -165,7 +180,7 @@ describe("applyMemoryWikiMutation", () => {
     const second = await applyMemoryWikiMutation({ config, mutation });
 
     expect(first.changed).toBe(true);
-    expect(first.compile).toBeDefined();
+    expect(first.compile).toBeUndefined();
     expect(second).toMatchObject({
       changed: false,
       operation: "create_synthesis",
@@ -179,7 +194,90 @@ describe("applyMemoryWikiMutation", () => {
     ).resolves.toBe(logBefore);
   });
 
-  it("applies multiple synthesis mutations with one compiled vault result", async () => {
+  it("invalidates a stale compiled snapshot after a changed page write", async () => {
+    const { config } = await createVault({
+      prefix: "memory-wiki-apply-cache-invalidation-",
+    });
+    const baseMutation = {
+      op: "create_synthesis" as const,
+      title: "Current Synthesis",
+      body: "Initial meaning.",
+      sourceIds: ["source.current"],
+    };
+    await applyMemoryWikiMutation({ config, mutation: baseMutation });
+    await compileMemoryWikiVault(config);
+    await expect(loadMemoryWikiCompiledCache(config)).resolves.not.toBeNull();
+
+    await applyMemoryWikiMutation({
+      config,
+      mutation: { ...baseMutation, body: "Updated meaning." },
+    });
+
+    await expect(loadMemoryWikiCompiledCache(config)).resolves.toBeNull();
+  });
+
+  it("replaces one exact observed legacy body without nesting managed blocks", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-apply-observed-replacement-",
+    });
+    const targetPath = path.join(rootDir, "syntheses", "legacy-synthesis.md");
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    const legacy = renderWikiMarkdown({
+      frontmatter: {
+        pageType: "synthesis",
+        id: "synthesis.legacy-synthesis",
+        title: "Legacy Synthesis",
+        sourceIds: ["source.legacy"],
+      },
+      body: "# Legacy understanding\n\nExact old model-authored meaning.\n",
+    });
+    await fs.writeFile(targetPath, legacy, "utf8");
+    const observedHash = createHash("sha256").update(legacy).digest("hex");
+
+    const result = await applyMemoryWikiMutation({
+      config,
+      mutation: {
+        op: "create_synthesis",
+        title: "Legacy Synthesis",
+        body: "# Legacy understanding\n\nExact old model-authored meaning.\n\nNew provenance.",
+        sourceIds: ["source.legacy"],
+        replaceObservedContentHash: observedHash,
+      },
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.compile).toBeUndefined();
+    const updated = await fs.readFile(targetPath, "utf8");
+    expect(updated.match(/<!-- openclaw:wiki:generated:start -->/g)).toHaveLength(1);
+    expect(updated.match(/Exact old model-authored meaning\./g)).toHaveLength(1);
+    expect(updated).toContain("New provenance.");
+  });
+
+  it("fails closed when the observed legacy body changed before replacement", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-apply-observed-conflict-",
+    });
+    const targetPath = path.join(rootDir, "syntheses", "legacy-synthesis.md");
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    const original = "# Legacy\n\nCurrent meaning.\n";
+    await fs.writeFile(targetPath, original, "utf8");
+
+    await expect(
+      applyMemoryWikiMutation({
+        config,
+        mutation: {
+          op: "create_synthesis",
+          title: "Legacy Synthesis",
+          body: "Replacement meaning.",
+          sourceIds: ["source.legacy"],
+          replaceObservedContentHash: "a".repeat(64),
+        },
+      }),
+    ).rejects.toThrow("changed before observed-body replacement");
+    await expect(fs.readFile(targetPath, "utf8")).resolves.toBe(original);
+  });
+
+  it("applies multiple synthesis mutations before one explicit compiled vault refresh", async () => {
     const { rootDir, config } = await createVault({
       prefix: "memory-wiki-apply-batch-",
     });
@@ -217,7 +315,8 @@ describe("applyMemoryWikiMutation", () => {
         pageId: "synthesis.beta-batch",
       }),
     ]);
-    expect(result.compile?.pageCounts.synthesis).toBe(2);
+    expect(result.compile).toBeUndefined();
+    await compileMemoryWikiVault(config);
     const index = await fs.readFile(path.join(rootDir, "index.md"), "utf8");
     expect(index).toContain("[Alpha Batch](syntheses/alpha-batch.md)");
     expect(index).toContain("[Beta Batch](syntheses/beta-batch.md)");
@@ -262,11 +361,7 @@ describe("applyMemoryWikiMutation", () => {
     });
 
     expect(result.changed).toBe(true);
-    expect(result.compile?.pageCounts.source).toBe(0);
-    expect(result.compile?.pageCounts.synthesis).toBe(1);
-    expect(result.compile?.frontmatterErrors).toEqual([
-      expect.objectContaining({ relativePath: "sources/broken.md" }),
-    ]);
+    expect(result.compile).toBeUndefined();
     await expect(fs.readFile(brokenPath, "utf8")).resolves.toBe(brokenPage);
   });
 
@@ -371,7 +466,7 @@ keep this note
 
     expect(result.changed).toBe(true);
     expect(result.pagePath).toBe("entities/alpha.md");
-    expect(result.compile?.pageCounts.entity).toBe(1);
+    expect(result.compile).toBeUndefined();
 
     const updated = await fs.readFile(targetPath, "utf8");
     const parsed = parseWikiMarkdown(updated);
@@ -400,9 +495,7 @@ keep this note
     expect(parsed.frontmatter).not.toHaveProperty("confidence");
     expect(parsed.body).toContain("keep this note");
     expect(parsed.body).toContain("<!-- openclaw:human:start -->");
-    await expect(
-      fs.readFile(path.join(rootDir, "entities", "index.md"), "utf8"),
-    ).resolves.toContain("[Alpha](alpha.md)");
+    await expect(fs.access(path.join(rootDir, "entities", "index.md"))).rejects.toThrow();
   });
 
   it("preserves disjoint metadata updates from concurrent agent turns", async () => {
