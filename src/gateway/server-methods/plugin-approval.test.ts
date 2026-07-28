@@ -3,6 +3,7 @@
 
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExecApprovalForwarder } from "../../infra/exec-approval-forwarder.js";
 import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.js";
 import { ExecApprovalManager } from "../exec-approval-manager.js";
 import { createPluginApprovalHandlers } from "./plugin-approval.js";
@@ -323,6 +324,73 @@ describe("createPluginApprovalHandlers", () => {
       const finalResult = expectResponseOk(respond, 1);
       expect(finalResult.id).toBe(approvalId);
       expect(finalResult.decision).toBe("allow-once");
+    });
+
+    it("marks trusted incognito approval-runtime requests ephemeral", async () => {
+      const handleForwardedRequest = vi.fn(async () => true);
+      const handleIosPushRequest = vi.fn(async () => true);
+      const publishRequested = vi.fn(() => 1);
+      const context = createApprovalContext();
+      context.approvalEvents = { publishRequested, publishResolved: vi.fn() };
+      const handlers = createPluginApprovalHandlers(manager, {
+        forwarder: {
+          handlePluginApprovalRequested: handleForwardedRequest,
+        } as unknown as ExecApprovalForwarder,
+        iosPushDelivery: { handleRequested: handleIosPushRequest },
+      });
+      const respond = vi.fn();
+      const opts = createMockOptions(
+        "plugin.approval.request",
+        {
+          title: "Incognito action",
+          description: "Do not persist this prompt",
+          sessionKey: "agent:main:dashboard:incognito-order",
+          twoPhase: true,
+        },
+        {
+          client: createClient({ approvalRuntime: true }),
+          context,
+          respond,
+        },
+      );
+
+      const requestPromise = expectDefined(
+        handlers["plugin.approval.request"],
+        'handlers["plugin.approval.request"] test invariant',
+      )(opts);
+      const approvalId = await waitForAcceptedApproval(respond);
+
+      expect(manager.getSnapshot(approvalId)?.persistenceMode).toBe("ephemeral");
+      expect(opts.context.broadcast).toHaveBeenCalled();
+      expect(publishRequested).not.toHaveBeenCalled();
+      expect(handleForwardedRequest).not.toHaveBeenCalled();
+      expect(handleIosPushRequest).not.toHaveBeenCalled();
+      manager.resolve(approvalId, "deny");
+      await requestPromise;
+    });
+
+    it("does not trust a public caller's forged incognito session key", async () => {
+      const respond = vi.fn();
+      const opts = createMockOptions(
+        "plugin.approval.request",
+        {
+          title: "Forged incognito action",
+          description: "Ordinary clients retain the normal approval mode",
+          sessionKey: "agent:main:dashboard:incognito-forged",
+          twoPhase: true,
+        },
+        { respond },
+      );
+
+      const requestPromise = expectDefined(
+        createPluginApprovalHandlers(manager)["plugin.approval.request"],
+        'handlers["plugin.approval.request"] test invariant',
+      )(opts);
+      const approvalId = await waitForAcceptedApproval(respond);
+
+      expect(manager.getSnapshot(approvalId)?.persistenceMode).toBeUndefined();
+      manager.resolve(approvalId, "deny");
+      await requestPromise;
     });
 
     it("delivers requests to iOS push with the exec-equivalent visibility gate", async () => {

@@ -319,6 +319,58 @@ describe("ExecApprovalManager", () => {
     });
   });
 
+  it("keeps an ephemeral record process-local inside a persistent manager", async () => {
+    const { manager, databaseOptions } = createPersistentManager();
+    const record = manager.create(
+      {
+        command: "echo incognito",
+        sessionKey: "agent:main:dashboard:incognito-order",
+      },
+      60_000,
+      "approval-ephemeral",
+      { persistenceMode: "ephemeral" },
+    );
+    const decisionPromise = manager.register(record, 60_000);
+
+    expect(getOperatorApproval({ id: record.id, databaseOptions })).toBeNull();
+    expect(manager.getEphemeralOperatorRecord(record.id)).toMatchObject({
+      id: record.id,
+      status: "pending",
+      runtimeEpoch: "process-local",
+    });
+
+    const restartedManager = new ExecApprovalManager<ExecApprovalRequestPayload>({
+      approvalKind: "exec",
+      persistence: { runtimeEpoch: "runtime-b", databaseOptions },
+      resolveAllowedDecisions: () => ["allow-once", "deny"],
+    });
+    expect(restartedManager.getEphemeralOperatorRecord(record.id)).toBeNull();
+    expect(
+      restartedManager.resolveDetailed(record.id, "allow-once", {
+        kind: "device",
+        id: "control-ui",
+      }),
+    ).toEqual({ outcome: "not-found" });
+    expect(getOperatorApproval({ id: record.id, databaseOptions })).toBeNull();
+
+    expect(
+      manager.resolveDetailed(
+        record.id,
+        "allow-once",
+        { kind: "device", id: "control-ui" },
+        "Control UI",
+      ),
+    ).toMatchObject({ outcome: "resolved" });
+    await expect(decisionPromise).resolves.toBe("allow-once");
+    expect(manager.consumeAllowOnce(record.id, "tool-call")).toBe(true);
+    expect(getOperatorApproval({ id: record.id, databaseOptions })).toBeNull();
+    expect(manager.getEphemeralOperatorRecord(record.id)).toMatchObject({
+      status: "allowed",
+      decision: "allow-once",
+      consumedBy: null,
+    });
+  });
+
   it("emits pending only after durable insert and live waiter registration", async () => {
     let durableAtCallback: ReturnType<typeof getOperatorApproval> = null;
     let waiterAtCallback: Promise<ExecApprovalDecision | null> | null = null;

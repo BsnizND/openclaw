@@ -133,6 +133,12 @@ export async function publishAppliedApprovalResolution(params: {
         liveRecord: params.liveRecord,
       }),
   });
+  // Incognito approval presentations may be shown to currently connected
+  // approval clients, but must never enter channel, push, or native-forwarder
+  // lifecycles that can retain the request payload.
+  if (params.liveRecord.persistenceMode === "ephemeral") {
+    return;
+  }
   const nativeApprovalKind = params.record.kind;
   if (nativeApprovalKind === "exec" || nativeApprovalKind === "plugin") {
     // Native approval routes are instance-local, so publish the canonical CAS
