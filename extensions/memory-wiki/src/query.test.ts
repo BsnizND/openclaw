@@ -1778,6 +1778,7 @@ describe("getMemoryWikiPage", () => {
       "utf8",
     );
 
+    const readdir = vi.spyOn(fs, "readdir");
     const result = await getMemoryWikiPage({
       config,
       lookup: "sources/alpha.md",
@@ -1792,6 +1793,8 @@ describe("getMemoryWikiPage", () => {
     expect(result?.content).not.toContain("line three");
     expect(result?.totalLines).toBe(7);
     expect(result?.truncated).toBe(true);
+    expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
   });
 
   it("defaults non-finite wiki line options before slicing", async () => {
