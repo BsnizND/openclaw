@@ -1,5 +1,6 @@
 // Approval shared helpers normalize pending exec/plugin approval lookups,
 // decision payloads, turn-source routing, and gateway error responses.
+/* oxlint-disable max-lines -- installed-version backport extends this grandfathered owner. */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import type { ValidationError } from "../../../packages/gateway-protocol/src/index.js";
@@ -441,6 +442,7 @@ export async function handlePendingApprovalRequest<
   const releaseHandoff = params.manager.retainForHandoff(params.record.id);
   try {
     const suppressDelivery = params.suppressDelivery === true;
+    const approvalClientsOnly = params.record.persistenceMode === "ephemeral";
     const approvalClientConnIds = suppressDelivery
       ? null
       : resolveApprovalRequestRecipientConnIds({
@@ -467,10 +469,12 @@ export async function handlePendingApprovalRequest<
     }
     const internalApprovalSubscriberCount = suppressDelivery
       ? 0
-      : (params.context.approvalEvents?.publishRequested(
-          params.approvalKind ?? "exec",
-          params.requestEvent,
-        ) ?? 0);
+      : approvalClientsOnly
+        ? 0
+        : (params.context.approvalEvents?.publishRequested(
+            params.approvalKind ?? "exec",
+            params.requestEvent,
+          ) ?? 0);
 
     const hasApprovalClients = suppressDelivery
       ? false
@@ -478,11 +482,13 @@ export async function handlePendingApprovalRequest<
         ? approvalClientConnIds.size > 0 || internalApprovalSubscriberCount > 0
         : (params.context.hasExecApprovalClients?.(params.clientConnId) ?? false) ||
           internalApprovalSubscriberCount > 0;
-    const deliveredResult = suppressDelivery ? false : params.deliverRequest();
+    const deliveredResult =
+      suppressDelivery || approvalClientsOnly ? false : params.deliverRequest();
     const delivered = isPromiseLike(deliveredResult) ? await deliveredResult : deliveredResult;
     // A turn-source route can approve without an active approval client, so keep
     // the record alive when the originating channel/account can still receive it.
     const hasTurnSourceRoute =
+      !approvalClientsOnly &&
       !hasApprovalClients &&
       !delivered &&
       hasApprovalTurnSourceRoute({
@@ -499,7 +505,7 @@ export async function handlePendingApprovalRequest<
           : "none";
 
     const respondWithDecision = async (decision: ExecApprovalDecision | null): Promise<void> => {
-      if (params.afterDecision) {
+      if (!approvalClientsOnly && params.afterDecision) {
         try {
           await params.afterDecision(decision, params.requestEvent);
         } catch (err) {
@@ -734,25 +740,30 @@ export async function handleApprovalResolve<TPayload, TResolvedEvent extends obj
   } else {
     params.context.broadcast(params.resolvedEventName, resolvedEvent, { dropIfSlow: true });
   }
-  params.context.approvalEvents?.publishResolved(
-    params.approvalKind ?? (params.resolvedEventName.startsWith("plugin.") ? "plugin" : "exec"),
-    resolvedEvent as never,
-  );
+  const approvalClientsOnly = resolved.snapshot.persistenceMode === "ephemeral";
+  if (!approvalClientsOnly) {
+    params.context.approvalEvents?.publishResolved(
+      params.approvalKind ?? (params.resolvedEventName.startsWith("plugin.") ? "plugin" : "exec"),
+      resolvedEvent as never,
+    );
+  }
 
-  const followUps = [
-    params.forwardResolved
-      ? {
-          run: params.forwardResolved,
-          errorLabel: params.forwardResolvedErrorLabel ?? "approval resolve follow-up failed",
-        }
-      : null,
-    ...(params.extraResolvedHandlers ?? []),
-  ].filter(
-    (
-      entry,
-    ): entry is { run: (event: TResolvedEvent) => Promise<void> | void; errorLabel: string } =>
-      Boolean(entry),
-  );
+  const followUps = approvalClientsOnly
+    ? []
+    : [
+        params.forwardResolved
+          ? {
+              run: params.forwardResolved,
+              errorLabel: params.forwardResolvedErrorLabel ?? "approval resolve follow-up failed",
+            }
+          : null,
+        ...(params.extraResolvedHandlers ?? []),
+      ].filter(
+        (
+          entry,
+        ): entry is { run: (event: TResolvedEvent) => Promise<void> | void; errorLabel: string } =>
+          Boolean(entry),
+      );
 
   // Resolution has already been recorded and broadcast; follow-up hooks are
   // best-effort so a plugin/channel forwarding failure cannot reopen it.

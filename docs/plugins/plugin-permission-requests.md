@@ -57,6 +57,7 @@ export default definePluginEntry({
         requireApproval: {
           title: "Deploy service",
           description: `Deploy service to ${environment}.`,
+          detail: `Environment: ${environment}\nChange: exact reviewed deployment`,
           severity: environment === "production" ? "critical" : "warning",
           allowedDecisions:
             environment === "production"
@@ -78,6 +79,9 @@ Write prompt text for the person who will approve the action:
 - Keep `title` short and action-focused; the Gateway caps it at 80 characters.
 - Keep `description` specific and bounded; the Gateway caps it at 512
   characters.
+- Use `detail` for the exact reviewer-only payload a native approval surface
+  needs to show; the Gateway caps it at 16384 characters. It is not a secret
+  channel.
 - Include the action, target, and risk. Do not include secrets, tokens, or
   private payloads that should not appear in chat approval surfaces.
 - `severity` defaults to `"warning"` when omitted. Use `"critical"` only for
@@ -92,6 +96,15 @@ Write prompt text for the person who will approve the action:
 
 OpenClaw creates a pending approval with a `plugin:` ID, delivers it to the
 available approval surfaces, and waits for a decision.
+
+For a native `before_tool_call` request from a canonical incognito session,
+the Gateway keeps the approval and its presentation process-local. It does not
+insert the approval into the shared state database or return it from approval
+history. A Gateway restart discards the pending decision and cannot mint
+execution authority from it. The live request and resolution go only to
+currently connected native approval clients, not channel forwarders,
+turn-source routes, or push delivery. Ordinary sessions and non-runtime callers
+retain the normal durable approval lifecycle.
 
 | Decision          | Result                                                                    |
 | ----------------- | ------------------------------------------------------------------------- |

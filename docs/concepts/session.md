@@ -76,6 +76,8 @@ The `incognito-` segment is reserved for dashboard, subagent, and hidden interna
 
 Incognito does not restrict the agent's normal tools. An explicit request to save information, or any tool-driven file write, can still persist data outside the incognito session store. Your configured model provider still processes the messages you send, diagnostic logging remains unchanged, and OpenClaw still records content-free audit metadata such as HMAC references.
 
+Native plugin approvals requested by an incognito run remain process-local too: their prompt presentation is not inserted into the shared state database or approval history, and a Gateway restart discards the pending decision. Connected native approval clients can see the live prompt, but OpenClaw does not send it through channel forwarders, turn-source routes, or push delivery. This does not change provider retention or suppress ordinary diagnostic logs.
+
 On multi-user gateways, incognito threads are visible only to admin-scope connections and never appear through another session's agent session tools or transcript search. This protects them from storage and other gateway-mediated users, not from the gateway owner or process operator, who can always observe live sessions.
 
 ## Remember across conversations
