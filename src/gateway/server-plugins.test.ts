@@ -1467,6 +1467,39 @@ describe("loadGatewayPlugins", () => {
     });
   });
 
+  test("keeps plugin-owned subagent tool grants on the pinned Gateway registry", async () => {
+    const runtime = await createSubagentRuntime(serverPluginsModule);
+    serverPluginsModule.setFallbackGatewayContext(createTestContext("pinned-tools-also-allow"));
+    registerActivePluginToolOwnership("workboard", [], ["workboard_complete"]);
+    const startupRegistry = runtimeRegistryModule.getActivePluginRegistry();
+    expect(startupRegistry).not.toBeNull();
+    runtimeRegistryModule.pinActivePluginChannelRegistry(startupRegistry!);
+    expect(runtimeRegistryModule.getActivePluginChannelRegistry()).toBe(startupRegistry);
+
+    runtimeRegistryModule.setActivePluginRegistry(createRegistry([]));
+    expect(
+      runtimeRegistryModule
+        .collectLivePluginRegistries()
+        .flatMap((registry) => registry.tools)
+        .map((registration) => registration.pluginId),
+    ).toContain("workboard");
+
+    await gatewayRequestScopeModule.withPluginRuntimePluginScope(
+      { pluginId: "workboard", pluginOrigin: "bundled" },
+      () =>
+        runtime.run({
+          sessionKey: "s-pinned-tools-also-allow",
+          message: "finish the card",
+          toolsAlsoAllow: ["workboard_complete"],
+        }),
+    );
+
+    expect(getLastDispatchedClientInternal().runtimePluginToolGrant).toEqual({
+      pluginId: "workboard",
+      toolNames: ["workboard_complete"],
+    });
+  });
+
   test("rejects core and ambiguously-owned additive tool names", async () => {
     const runtime = await createSubagentRuntime(serverPluginsModule);
     serverPluginsModule.setFallbackGatewayContext(createTestContext("colliding-tools-also-allow"));

@@ -7,7 +7,7 @@ import {
 import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/version.js";
 import { isKnownCoreToolId } from "../agents/tool-catalog.js";
 import { normalizeToolName } from "../agents/tool-policy.js";
-import { getActivePluginRegistry } from "../plugins/runtime.js";
+import { collectLivePluginRegistries } from "../plugins/runtime.js";
 import type { RuntimePluginToolGrant } from "../plugins/runtime/tool-grant.js";
 import { APPROVALS_SCOPE, WRITE_SCOPE } from "./method-scopes.js";
 import type { TrustedSessionCreation } from "./server-methods/session-creation-provenance.js";
@@ -96,13 +96,14 @@ export function resolvePluginSubagentToolsAlsoAllow(params: {
   if (!pluginId) {
     throw new Error("toolsAlsoAllow requires plugin identity for subagent runs.");
   }
-  const registry = getActivePluginRegistry();
+  const registries = collectLivePluginRegistries();
   for (const toolName of requested) {
     if (isKnownCoreToolId(toolName)) {
       throw new Error(`plugin "${pluginId}" may not add core tool "${toolName}" to subagent runs.`);
     }
     const owners = uniqueStrings(
-      (registry?.tools ?? [])
+      registries
+        .flatMap((registry) => registry.tools ?? [])
         .filter((registration) =>
           [...registration.names, ...(registration.declaredNames ?? [])].some(
             (registeredName) => normalizeToolName(registeredName) === toolName,
