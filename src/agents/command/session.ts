@@ -26,6 +26,7 @@ import {
 import { resolveChannelResetConfig, resolveSessionResetType } from "../../config/sessions/reset.js";
 import { listSessionEntries } from "../../config/sessions/session-accessor.js";
 import { resolveSessionKey } from "../../config/sessions/session-key.js";
+import { resolveSessionStorePathForScope } from "../../config/sessions/session-store-path.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
@@ -312,8 +313,13 @@ export function resolveSessionKeyForRequest(opts: {
       ? (requestedAgentId ?? defaultAgentId)
       : resolveAgentIdFromSessionKey(explicitSessionKey)
     : (requestedAgentId ?? defaultAgentId);
-  const storePath = resolveStorePath(sessionCfg?.store, {
+  const durableStorePath = resolveStorePath(sessionCfg?.store, {
     agentId: storeAgentId,
+  });
+  const storePath = resolveSessionStorePathForScope({
+    agentId: storeAgentId,
+    sessionKey: explicitSessionKey,
+    storePath: durableStorePath,
   });
   const loadOptions = opts.clone === false ? { clone: false as const } : undefined;
   const sessionStore = loadCommandSessionStore({
