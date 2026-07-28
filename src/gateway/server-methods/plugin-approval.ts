@@ -17,6 +17,7 @@ import type {
   PluginApprovalResolved,
 } from "../../infra/plugin-approvals.js";
 import { resolvePluginApprovalTimeoutMs } from "../../infra/plugin-approvals.js";
+import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import type { ExecApprovalManager } from "../exec-approval-manager.js";
 import {
   bindApprovalRequesterMetadata,
@@ -116,7 +117,16 @@ export function createPluginApprovalHandlers(
 
       // Always server-generate the ID — never accept plugin-provided IDs.
       // Kind-prefix so /approve routing can distinguish plugin vs exec IDs deterministically.
-      const record = manager.create(request, timeoutMs, `plugin:${randomUUID()}`);
+      // Only the server-authenticated approval runtime may select process-local
+      // handling, and only for a canonical incognito session key.
+      const processLocal =
+        client?.internal?.approvalRuntime === true && isIncognitoSessionKey(request.sessionKey);
+      const record = manager.create(
+        request,
+        timeoutMs,
+        `plugin:${randomUUID()}`,
+        processLocal ? { persistenceMode: "ephemeral" } : undefined,
+      );
       bindApprovalRequesterMetadata({ record, client });
       if (client?.internal?.approvalRuntime === true) {
         bindApprovalReviewerDeviceIds({

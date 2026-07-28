@@ -192,6 +192,19 @@ function loadVisibleApproval(params: {
   ) {
     return null;
   }
+  const ephemeralRecord =
+    params.execApprovalManager.getEphemeralOperatorRecord(params.id) ??
+    params.pluginApprovalManager.getEphemeralOperatorRecord(params.id) ??
+    params.systemAgentApprovalManager?.getEphemeralOperatorRecord(params.id);
+  if (ephemeralRecord) {
+    return canAccessOperatorApproval({
+      client: params.client,
+      allowApprovalRuntime: params.allowApprovalRuntime,
+      binding: { reviewerDeviceIds: ephemeralRecord.reviewerDeviceIds },
+    })
+      ? ephemeralRecord
+      : null;
+  }
   let lookup: ReturnType<typeof getOperatorApprovalDetailed>;
   try {
     lookup = params.allowTransportRef

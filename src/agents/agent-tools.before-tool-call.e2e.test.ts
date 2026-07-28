@@ -2351,6 +2351,7 @@ describe("before_tool_call requireApproval handling", () => {
       requireApproval: {
         title: "Needs approval",
         description: "Check this",
+        detail: "Exact reviewer-only details",
         onResolution,
       },
     });
@@ -2365,6 +2366,9 @@ describe("before_tool_call requireApproval handling", () => {
     });
 
     expect(onResolution).toHaveBeenCalledWith("allow-once");
+    expect(mockCallGateway.mock.calls[0]?.[2]).toMatchObject({
+      detail: "Exact reviewer-only details",
+    });
   });
 
   it("allows allow-always decisions for tool approvals", async () => {
