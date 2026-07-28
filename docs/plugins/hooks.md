@@ -253,6 +253,7 @@ type BeforeToolCallResult = {
   requireApproval?: {
     title: string;
     description: string;
+    detail?: string;
     severity?: "info" | "warning" | "critical";
     timeoutMs?: number;
     /** @deprecated Unresolved approvals always deny. */
@@ -276,6 +277,8 @@ Guard behavior for typed lifecycle hooks:
   app-server report-mode native `PreToolUse` relays, this defers to the
   matching app-server approval request; see
   [Codex harness runtime](/plugins/codex-harness-runtime#hook-boundaries).
+- `detail` adds reviewer-only context to native approval surfaces. Do not put
+  secrets in it.
 - A lower-priority `block: true` can still block after a higher-priority hook
   requested approval.
 - `onResolution` receives the resolved decision: `allow-once`, `allow-always`,

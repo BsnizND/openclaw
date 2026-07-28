@@ -277,6 +277,87 @@ describe("unified approval handlers", () => {
     }
   });
 
+  it("resolves an ephemeral plugin approval without a durable row or history item", async () => {
+    const databaseOptions = createDatabaseOptions();
+    const managers = createManagers(databaseOptions);
+    const handleForwardedResolution = vi.fn(async () => {});
+    const handleIosPushResolution = vi.fn(async () => {});
+    const record = managers.plugin.create(
+      {
+        title: "Incognito purchase",
+        description: "Approve this exact purchase once",
+        detail: "Merchant, items, fees, tax, tip, and total",
+        pluginId: "example-plugin",
+        toolName: "example-tool",
+        agentId: "main",
+        sessionKey: "agent:main:dashboard:incognito-order",
+        allowedDecisions: ["allow-once", "deny"],
+      },
+      600_000,
+      "plugin:incognito-purchase",
+      { persistenceMode: "ephemeral" },
+    );
+    record.approvalReviewerDeviceIds = ["reviewer"];
+    const decision = managers.plugin.register(record, 600_000);
+    const handlers = createApprovalHandlers({
+      execApprovalManager: managers.exec,
+      pluginApprovalManager: managers.plugin,
+      systemAgentApprovalManager: managers.systemAgent,
+      databaseOptions,
+      forwarder: {
+        handlePluginApprovalResolved: handleForwardedResolution,
+      } as unknown as ExecApprovalForwarder,
+      pluginIosPushDelivery: { handleResolved: handleIosPushResolution },
+    });
+
+    expect(getOperatorApproval({ id: record.id, databaseOptions })).toBeNull();
+    const pending = await invoke({
+      handlers,
+      method: "approval.get",
+      body: { id: record.id },
+      client: createClient({ deviceId: "reviewer" }),
+    });
+    expect(pending.result).toMatchObject({
+      approval: {
+        status: "pending",
+        presentation: {
+          kind: "plugin",
+          detail: "Merchant, items, fees, tax, tip, and total",
+          allowedDecisions: ["allow-once", "deny"],
+        },
+      },
+    });
+
+    const resolveContext = createContext();
+    const resolved = await invoke({
+      handlers,
+      method: "approval.resolve",
+      body: { id: record.id, kind: "plugin", decision: "allow-once" },
+      client: createClient({ deviceId: "reviewer" }),
+      context: resolveContext,
+    });
+    expect(resolved.result).toMatchObject({
+      applied: true,
+      approval: { status: "allowed", decision: "allow-once" },
+    });
+    await expect(decision).resolves.toBe("allow-once");
+    expect(getOperatorApproval({ id: record.id, databaseOptions })).toBeNull();
+    await vi.waitFor(() => {
+      expect(resolveContext.broadcastToConnIds).toHaveBeenCalled();
+    });
+    expect(resolveContext.approvalEvents?.publishResolved).not.toHaveBeenCalled();
+    expect(handleForwardedResolution).not.toHaveBeenCalled();
+    expect(handleIosPushResolution).not.toHaveBeenCalled();
+
+    const history = await invoke({
+      handlers,
+      method: "approval.history",
+      body: {},
+      client: createClient({ deviceId: "reviewer" }),
+    });
+    expect(history.result).toEqual({ items: [] });
+  });
+
   it("resolves a system-agent proposal only through unified operator approval", async () => {
     const databaseOptions = createDatabaseOptions();
     const managers = createManagers(databaseOptions);
