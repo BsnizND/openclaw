@@ -498,9 +498,12 @@ subcommand set.
 
 Gateway callers may send one mutation directly to `wiki.apply` or send a
 non-empty `{ mutations: [...] }` batch. Batched mutations retain input order,
-share one vault mutation lock, and compile the resulting vault state once;
-callers should still verify each returned page through exact `wiki.get`
-readback.
+share one vault mutation lock, and invalidate the compiled snapshot after
+changed pages are written. Ordinary semantic search and exact `wiki.get` read
+current pages without a synchronous full-vault compile; run `wiki.compile`
+explicitly when refreshed indexes, dashboards, related blocks,
+source-evidence acceleration, or prompt digests are required. Callers should
+still verify each returned page through exact `wiki.get` readback.
 
 ## Obsidian support
 
