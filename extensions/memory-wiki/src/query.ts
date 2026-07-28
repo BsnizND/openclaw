@@ -1470,6 +1470,20 @@ function resolveCanonicalPageIdPath(lookup: string): string | null {
   return `${directoryByKind[kind]}/${slugifyWikiPageStem(idTail)}.md`;
 }
 
+function resolveDirectWikiPagePath(lookup: string): string | null {
+  const normalized = normalizeLookupKey(lookup);
+  const withExtension = normalized.endsWith(".md") ? normalized : `${normalized}.md`;
+  const segments = withExtension.split("/");
+  if (
+    path.posix.isAbsolute(withExtension) ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..") ||
+    !QUERY_DIRS.includes(segments[0] as (typeof QUERY_DIRS)[number])
+  ) {
+    return null;
+  }
+  return withExtension;
+}
+
 async function readQueryableWikiPageByPathIfPresent(
   rootDir: string,
   relativePath: string | null,
@@ -1601,7 +1615,7 @@ export async function getMemoryWikiPage(params: {
   if (shouldSearchWiki(effectiveConfig)) {
     const directLookupPageCandidate = await readQueryableWikiPageByPathIfPresent(
       effectiveConfig.vault.path,
-      resolveCanonicalPageIdPath(params.lookup),
+      resolveCanonicalPageIdPath(params.lookup) ?? resolveDirectWikiPagePath(params.lookup),
     );
     const directLookupPage =
       directLookupPageCandidate &&
