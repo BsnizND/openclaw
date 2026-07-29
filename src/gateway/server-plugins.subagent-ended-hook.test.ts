@@ -2,6 +2,7 @@
  * Tests plugin hook delivery when subagent sessions end.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { validateAgentParams } from "../../packages/gateway-protocol/src/index.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.test-fixtures.js";
 import type { GatewayRequestContext, GatewayRequestOptions } from "./server-methods/types.js";
@@ -139,6 +140,7 @@ describe("createGatewaySubagentRuntime.run subagent_ended tracking (#59164)", ()
       },
     });
     expect(request.req.params).not.toHaveProperty("sourceSessionKey");
+    expect(validateAgentParams(request.req.params)).toBe(true);
   });
 
   test("does not dispatch when no runtime config is available", async () => {
