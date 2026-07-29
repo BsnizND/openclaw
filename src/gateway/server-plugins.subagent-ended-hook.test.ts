@@ -116,6 +116,26 @@ describe("createGatewaySubagentRuntime.run subagent_ended tracking (#59164)", ()
     expect(request.client?.internal?.pluginRuntimeOwnerId).toBe("memory-core");
   });
 
+  test("forwards the native requester session for child approval audiences", async () => {
+    const serverPlugins = await loadServerPlugins();
+    const runtime = serverPlugins.createGatewaySubagentRuntime();
+    serverPlugins.setFallbackGatewayContext(createTestContext("plugin-requester", createTestCfg()));
+
+    await runtime.run({
+      sessionKey: "agent:main:dashboard:incognito-plugin-child",
+      sourceSessionKey: "agent:main:lifeos-home:requester",
+      message: "complete the bounded child task",
+      deliver: false,
+    });
+
+    const request = lastGatewayRequest();
+    expect(request.req.method).toBe("agent");
+    expect(request.req.params).toMatchObject({
+      sessionKey: "agent:main:dashboard:incognito-plugin-child",
+      sourceSessionKey: "agent:main:lifeos-home:requester",
+    });
+  });
+
   test("does not dispatch when no runtime config is available", async () => {
     const serverPlugins = await loadServerPlugins();
     const runtime = serverPlugins.createGatewaySubagentRuntime();
