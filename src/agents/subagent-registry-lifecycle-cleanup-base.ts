@@ -143,15 +143,17 @@ export function createSubagentRegistryLifecycleCleanupBase(
     completion.fallbackResultText = undefined;
     completion.fallbackCapturedAt = undefined;
     params.resumedRuns.delete(args.runId);
-    safeSetSubagentTaskDeliveryStatus({
-      entry: args.entry,
-      deliveryStatus: "failed",
-      deliveryError: getDeliveryLastError(args.entry) ?? args.reason,
-    });
-    safeMarkRequiredCompletionDeliveryBlocked({
-      entry: args.entry,
-      reason: getDeliveryLastError(args.entry) ?? args.reason,
-    });
+    if (args.entry.requesterTurnYielded !== true) {
+      safeSetSubagentTaskDeliveryStatus({
+        entry: args.entry,
+        deliveryStatus: "failed",
+        deliveryError: getDeliveryLastError(args.entry) ?? args.reason,
+      });
+      safeMarkRequiredCompletionDeliveryBlocked({
+        entry: args.entry,
+        reason: getDeliveryLastError(args.entry) ?? args.reason,
+      });
+    }
     logAnnounceGiveUp(args.entry, args.reason);
     markRequesterSettleWakePending(args.entry);
     try {

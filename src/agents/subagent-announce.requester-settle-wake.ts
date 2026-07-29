@@ -6,7 +6,7 @@
  */
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { logWarn } from "../logger.js";
-import { isCronSessionKey } from "../sessions/session-key-utils.js";
+import { isCronSessionKey, parseCronRunScopeSuffix } from "../sessions/session-key-utils.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
@@ -58,6 +58,10 @@ type SettledRunSummary = Pick<
 >;
 
 export type RequesterSettleWakeBatchState = Omit<RequesterSettleWakeState, "retireAfterSettle">;
+export type RequesterSettleWakeResolution =
+  | { status: "delivered" }
+  | { status: "failed"; error?: string }
+  | { status: "unchanged" };
 
 const REQUESTER_SETTLE_WAKE_MAX_ATTEMPTS = 3;
 const REQUESTER_SETTLE_WAKE_MAX_AMBIGUOUS_REPLAYS = 3;
@@ -160,13 +164,18 @@ function deferRequesterSettleWakeBatch(params: {
 function completeRequesterSettleWakeBatch(params: {
   runIds: readonly string[];
   state: RequesterSettleWakeBatchState;
-  completeBatch(runIds: readonly string[], rearmGeneration?: number): void;
+  resolution: RequesterSettleWakeResolution;
+  completeBatch(
+    runIds: readonly string[],
+    rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
+  ): void;
 }): void {
   if (params.state.rearmGeneration === undefined) {
-    params.completeBatch(params.runIds);
+    params.completeBatch(params.runIds, undefined, params.resolution);
     return;
   }
-  params.completeBatch(params.runIds, params.state.rearmGeneration);
+  params.completeBatch(params.runIds, params.state.rearmGeneration, params.resolution);
 }
 
 /**
@@ -179,32 +188,31 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
   requesterOrigin?: DeliveryContext;
   settledEntry: SubagentRunRecord;
   transitionBatch: (runIds: readonly string[], state: RequesterSettleWakeBatchState) => void;
-  completeBatch(runIds: readonly string[], rearmGeneration?: number): void;
+  completeBatch(
+    runIds: readonly string[],
+    rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
+  ): void;
   signal?: AbortSignal;
 }): Promise<boolean> {
   if (params.signal?.aborted) {
     return false;
   }
-  const completeBatch = (runIds: readonly string[], rearmGeneration?: number): void => {
-    if (rearmGeneration === undefined) {
-      params.completeBatch(runIds);
-      return;
-    }
-    params.completeBatch(runIds, rearmGeneration);
-  };
+  const completeBatch = (
+    runIds: readonly string[],
+    rearmGeneration?: number,
+    resolution?: RequesterSettleWakeResolution,
+  ): void => params.completeBatch(runIds, rearmGeneration, resolution);
   const requesterSessionKey = params.requesterSessionKey.trim();
   const initialState = params.settledEntry.requesterSettleWake;
   if (!requesterSessionKey || !initialState) {
     return false;
   }
-  if (isCronSessionKey(requesterSessionKey)) {
-    completeRequesterSettleWakeBatch({
-      runIds: [params.settledEntry.runId],
-      state: initialState,
-      completeBatch,
-    });
-    return false;
-  }
+  // Registry ownership and idempotency remain scoped to the exact isolated
+  // cron run. The resumable requester transcript, however, is owned by the
+  // cache-stable base cron session.
+  const requesterDeliverySessionKey =
+    parseCronRunScopeSuffix(requesterSessionKey).baseSessionKey ?? requesterSessionKey;
 
   const registryRuntime = await requesterSettleWakeDeps.loadSubagentRegistryRuntime();
   const listedRuns = registryRuntime.listSubagentRunsForRequester(requesterSessionKey);
@@ -257,27 +265,32 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
   );
   // A frozen single-child batch can be re-admitted after its requester yielded.
   // The earlier steered completion died with that run, so the idle requester needs a fresh turn.
-  const requesterYieldedAfterDelivery = selectedState.afterRequesterYield === true;
+  const requesterNeedsFreshTurn =
+    selectedState.afterRequesterYield === true ||
+    (selectedState.requesterYieldBatch === true && isCronSessionKey(requesterSessionKey));
   if (
     requiredSettled.length === 0 ||
-    (requiredSettled.length < 2 &&
-      !hasUndeliveredRequiredCompletion &&
-      !requesterYieldedAfterDelivery) ||
+    (requiredSettled.length < 2 && !hasUndeliveredRequiredCompletion && !requesterNeedsFreshTurn) ||
     getSubagentDepthFromSessionStore(requesterSessionKey) >= 1
   ) {
     completeRequesterSettleWakeBatch({
       runIds: batchRunIds,
       state: selectedState,
+      resolution: { status: "unchanged" },
       completeBatch,
     });
     return false;
   }
 
-  const { entry: requesterEntry } = loadRequesterSessionEntry(requesterSessionKey);
+  const { entry: requesterEntry } = loadRequesterSessionEntry(requesterDeliverySessionKey);
   if (!hasUsableSessionEntry(requesterEntry)) {
     completeRequesterSettleWakeBatch({
       runIds: batchRunIds,
       state: selectedState,
+      resolution: {
+        status: hasUndeliveredRequiredCompletion ? "failed" : "unchanged",
+        ...(hasUndeliveredRequiredCompletion ? { error: "requester session unavailable" } : {}),
+      },
       completeBatch,
     });
     return false;
@@ -342,6 +355,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         completeRequesterSettleWakeBatch({
           runIds: batchRunIds,
           state,
+          resolution: {
+            status: "failed",
+            error: state.lastError ?? "requester settle wake retry limit reached",
+          },
           completeBatch,
         });
         return false;
@@ -361,7 +378,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
     let delivery: Awaited<ReturnType<typeof deliverSubagentAnnouncement>>;
     try {
       delivery = await deliverSubagentAnnouncement({
-        requesterSessionKey,
+        requesterSessionKey: requesterDeliverySessionKey,
         triggerMessage: wakeMessage,
         steerMessage: wakeMessage,
         summaryLine: "all spawned subagents settled",
@@ -371,7 +388,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         sourceSessionKey: currentSettledEntry.childSessionKey,
         sourceChannel: INTERNAL_MESSAGE_CHANNEL,
         sourceTool: "subagent_announce",
-        targetRequesterSessionKey: requesterSessionKey,
+        targetRequesterSessionKey: requesterDeliverySessionKey,
         requesterIsSubagent: false,
         expectsCompletionMessage: false,
         directIdempotencyKey: buildAnnounceIdempotencyKey(
@@ -392,6 +409,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         completeRequesterSettleWakeBatch({
           runIds: batchRunIds,
           state,
+          resolution: { status: "failed", error: lastError },
           completeBatch,
         });
         return false;
@@ -418,6 +436,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       completeRequesterSettleWakeBatch({
         runIds: batchRunIds,
         state,
+        resolution: { status: "delivered" },
         completeBatch,
       });
       return true;
@@ -426,6 +445,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       completeRequesterSettleWakeBatch({
         runIds: batchRunIds,
         state,
+        resolution: {
+          status: "failed",
+          error: delivery.error ?? delivery.reason ?? "requester settle wake failed",
+        },
         completeBatch,
       });
       return false;
@@ -437,6 +460,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       completeRequesterSettleWakeBatch({
         runIds: batchRunIds,
         state,
+        resolution: {
+          status: "failed",
+          error: delivery.error ?? delivery.reason ?? "requester settle wake retry limit reached",
+        },
         completeBatch,
       });
       return false;

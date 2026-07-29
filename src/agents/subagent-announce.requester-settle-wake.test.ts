@@ -1,6 +1,6 @@
 // Requester settle wake tests cover the registry-less top-level requester:
 // drain gating, batch idempotency, and the guards that keep the wake out of
-// nested/cron/single-delivered paths.
+// nested and single-delivered paths.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
@@ -62,6 +62,7 @@ vi.mock("./subagent-depth.js", () => ({
 import {
   maybeWakeRequesterAfterAllChildrenSettled,
   type RequesterSettleWakeBatchState,
+  type RequesterSettleWakeResolution,
 } from "./subagent-announce.requester-settle-wake.js";
 
 const REQUESTER = "agent:main:main";
@@ -105,7 +106,12 @@ function transitionBatch(runIds: readonly string[], state: RequesterSettleWakeBa
   }
 }
 
-function completeBatch(runIds: readonly string[], rearmGeneration?: number): void {
+function completeBatch(
+  runIds: readonly string[],
+  rearmGeneration?: number,
+  resolution?: RequesterSettleWakeResolution,
+): void {
+  void resolution;
   if (rearmGeneration === undefined) {
     completeBatchSpy(runIds);
   } else {
@@ -343,13 +349,76 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(deliverSpy).not.toHaveBeenCalled();
   });
 
-  it("skips cron requester sessions", async () => {
+  it("wakes a yielded cron requester whose active child later settles", async () => {
+    const cronRequester = "agent:main:cron:daily-report";
+    sessionStore[cronRequester] = { sessionId: "sess-cron" };
+    const child = makeSettledChild({
+      runId: "run-cron",
+      requesterSessionKey: cronRequester,
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds: ["run-cron"],
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      },
+    });
+    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+
     const woke = await maybeWakeRequesterAfterAllChildrenSettled(
-      wakeParams({ requesterSessionKey: "agent:main:cron:daily-report" }),
+      wakeParams({ requesterSessionKey: cronRequester, settledEntry: child }),
     );
 
-    expect(woke).toBe(false);
-    expect(deliverSpy).not.toHaveBeenCalled();
+    expect(woke).toBe(true);
+    expect(deliverSpy).toHaveBeenCalledOnce();
+    expect(deliveredCallArg().targetRequesterSessionKey).toBe(cronRequester);
+    expect(deliveredCallArg().directIdempotencyKey).toBe(
+      `announce:requester-settle:${cronRequester}:run-cron:yield-1`,
+    );
+    expect(completeBatchSpy).toHaveBeenCalledWith(["run-cron"], 1);
+  });
+
+  it("resumes a run-scoped cron requester through its native base session", async () => {
+    const cronBaseRequester = "agent:main:cron:daily-report";
+    const cronRunRequester = `${cronBaseRequester}:run:sess-cron`;
+    sessionStore = { [cronBaseRequester]: { sessionId: "sess-cron" } };
+    const child = makeSettledChild({
+      runId: "run-cron-scoped",
+      requesterSessionKey: cronRunRequester,
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds: ["run-cron-scoped"],
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      },
+    });
+    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+    const resolvedBatch = vi.fn();
+
+    const woke = await maybeWakeRequesterAfterAllChildrenSettled(
+      wakeParams({
+        requesterSessionKey: cronRunRequester,
+        settledEntry: child,
+        completeBatch: resolvedBatch,
+      }),
+    );
+
+    expect(woke).toBe(true);
+    expect(deliverSpy).toHaveBeenCalledOnce();
+    expect(deliveredCallArg().requesterSessionKey).toBe(cronBaseRequester);
+    expect(deliveredCallArg().targetRequesterSessionKey).toBe(cronBaseRequester);
+    expect(deliveredCallArg().directIdempotencyKey).toBe(
+      `announce:requester-settle:${cronRunRequester}:run-cron-scoped:yield-1`,
+    );
+    expect(registryRuntimeMock.listSubagentRunsForRequester).toHaveBeenCalledWith(cronRunRequester);
+    expect(registryRuntimeMock.hasDescendantRunAwaitingSettle).toHaveBeenCalledWith(
+      cronRunRequester,
+      "run-cron-scoped",
+    );
+    expect(resolvedBatch).toHaveBeenCalledWith(["run-cron-scoped"], 1, {
+      status: "delivered",
+    });
   });
 
   it("skips requesters whose session entry is gone", async () => {
@@ -809,7 +878,7 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
       }
     });
 
-    it("resolves mixed keep/delete, nested, cron, and fire-and-forget obligations", async () => {
+    it("resolves mixed keep/delete, nested, and fire-and-forget obligations", async () => {
       const mixed = [
         makeSettledChild({ runId: "run-delete", cleanup: "delete" }),
         makeSettledChild({ runId: "run-keep", cleanup: "keep" }),
@@ -856,15 +925,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
         ),
       ).toBe(false);
       expect(completeBatchSpy).toHaveBeenLastCalledWith(["run-nested-a", "run-nested-b"]);
-
-      completeBatchSpy.mockClear();
-      const cron = makeSettledChild({ runId: "run-cron" });
-      expect(
-        await maybeWakeRequesterAfterAllChildrenSettled(
-          wakeParams({ requesterSessionKey: "agent:main:cron:daily", settledEntry: cron }),
-        ),
-      ).toBe(false);
-      expect(completeBatchSpy).toHaveBeenLastCalledWith(["run-cron"]);
     });
   });
 });

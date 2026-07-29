@@ -5,6 +5,7 @@ import type { DetachedTaskFindResult } from "../tasks/detached-task-runtime-cont
 import {
   completeTaskRunByRunId,
   failTaskRunByRunId,
+  finalizeTaskRunByRunId,
   setDetachedTaskDeliveryStatusByRunId,
 } from "../tasks/detached-task-runtime.js";
 import { resolveRequiredCompletionDeliveryFailureTerminalResult } from "../tasks/task-completion-contract.js";
@@ -15,6 +16,7 @@ import {
 import { isSilentAgentReplyText } from "./embedded-agent-runner/message-visibility.js";
 import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatch.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
+import type { RequesterSettleWakeResolution } from "./subagent-announce.requester-settle-wake.js";
 import {
   clearDeliveryState,
   ensureCompletionState,
@@ -249,6 +251,45 @@ export function createSubagentRegistryLifecycleDelivery(
     }
   };
 
+  const reconcileSubagentTaskAfterRequesterSettle = (
+    entry: SubagentRunRecord,
+    resolution: Exclude<RequesterSettleWakeResolution, { status: "unchanged" }>,
+  ) => {
+    if (resolution.status === "failed") {
+      safeSetSubagentTaskDeliveryStatus({
+        entry,
+        deliveryStatus: "failed",
+        deliveryError: resolution.error ?? "requester settle wake failed",
+      });
+      safeMarkRequiredCompletionDeliveryBlocked({
+        entry,
+        reason: resolution.error ?? "requester settle wake failed",
+      });
+      return;
+    }
+    safeSetSubagentTaskDeliveryStatus({ entry, deliveryStatus: "delivered" });
+    const terminal = resolveFinalizedSubagentTaskState(entry);
+    if (!terminal || terminal.status !== "succeeded") {
+      return;
+    }
+    const target = resolveSubagentTaskTarget(entry);
+    try {
+      finalizeTaskRunByRunId({
+        runId: target.runId,
+        runtime: "subagent",
+        sessionKey: target.sessionKey,
+        ...terminal,
+        clearError: true,
+      });
+    } catch (err) {
+      params.warn("failed to finalize requester-settled subagent task", {
+        error: buildSafeLifecycleErrorMeta(err),
+        runId: maskRunId(target.runId),
+        childSessionKey: maskSessionKey(target.sessionKey),
+      });
+    }
+  };
+
   const freezeRunResultAtCompletion = async (
     entry: SubagentRunRecord,
     outcome: SubagentRunOutcome,
@@ -462,6 +503,7 @@ export function createSubagentRegistryLifecycleDelivery(
     loadPendingFinalDeliveryPayload,
     markPendingFinalDelivery,
     recordAnnounceDeliveryResult,
+    reconcileSubagentTaskAfterRequesterSettle,
     refreshFrozenResultFromSession,
     refreshPendingFinalDeliveryPayload,
     safeFinalizeSubagentTaskRun,
