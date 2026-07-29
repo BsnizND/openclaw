@@ -12,6 +12,7 @@ import {
   loadSessionEntry,
   patchSessionEntryTarget,
 } from "./session-accessor.js";
+import { resolveSessionStorePathForScope } from "./session-store-path.js";
 
 const sessionKey = "agent:main:dashboard:incognito-round-trip";
 
@@ -22,7 +23,7 @@ afterEach(() => {
 describe("incognito transcript access", () => {
   it("keeps a Gateway-style entry volatile through command resolution", async () => {
     const gatewaySessionKey = "agent:main:dashboard:incognito-gateway-patch";
-    const storePath = resolveStorePath(undefined, { agentId: "main" });
+    const storePath = resolveSessionStorePathForScope({ sessionKey: gatewaySessionKey });
     const sessionFile = formatSqliteSessionFileMarker({
       agentId: "main",
       sessionId: "incognito-gateway-session",
