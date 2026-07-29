@@ -2,9 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveSession } from "../../agents/command/session.js";
 import { SessionManager } from "../../agents/sessions/session-manager.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import { createSessionEntryWithTranscript, loadSessionEntry } from "./session-accessor.js";
+import { resolveSessionStorePathForScope } from "./session-store-path.js";
 
 const sessionKey = "agent:main:dashboard:incognito-round-trip";
 
@@ -41,6 +43,18 @@ describe("incognito transcript access", () => {
           storePath: durableStorePath,
         })?.incognito,
       ).toBe(true);
+      expect(fs.existsSync(durableStorePath)).toBe(false);
+
+      const resolved = resolveSession({
+        cfg: { session: { store: durableStorePath } },
+        sessionId: "incognito-session",
+        sessionKey,
+      });
+      expect(resolved.storePath).toBe(resolveSessionStorePathForScope({ sessionKey }));
+      expect(resolved.sessionEntry).toMatchObject({
+        incognito: true,
+        sessionId: "incognito-session",
+      });
       expect(fs.existsSync(durableStorePath)).toBe(false);
 
       const firstTurn = SessionManager.open(created.sessionFile, cwd, cwd);
