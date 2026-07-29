@@ -17,6 +17,7 @@ import {
 import { finalizeTaskRunByRunId } from "../../tasks/detached-task-runtime.js";
 import type { TaskStatus } from "../../tasks/task-registry.types.js";
 import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
+import { canonicalizeSpawnedByForAgent } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
 import type { GatewayRequestContext, GatewayRequestHandlerOptions } from "./types.js";
 
@@ -158,6 +159,7 @@ export async function registerPluginSubagentRunFromGateway(params: {
   runId: string;
   childSessionKey: string;
   task: string;
+  requesterSessionKey?: string;
   requesterOrigin?: DeliveryContext;
   pluginId?: string;
 }): Promise<void> {
@@ -169,12 +171,18 @@ export async function registerPluginSubagentRunFromGateway(params: {
     cfg: params.cfg,
     agentId: resolveAgentIdFromSessionKey(childSessionKey),
   });
+  const requesterSessionKey =
+    canonicalizeSpawnedByForAgent(
+      params.cfg,
+      resolveAgentIdFromSessionKey(childSessionKey),
+      params.requesterSessionKey,
+    ) ?? ownerSessionKey;
   const { registerSubagentRun } = await import("../../agents/subagent-registry.js");
   registerSubagentRun({
     runId: params.runId,
     childSessionKey,
     controllerSessionKey: ownerSessionKey,
-    requesterSessionKey: ownerSessionKey,
+    requesterSessionKey,
     requesterOrigin: params.requesterOrigin,
     requesterDisplayKey: "main",
     task: params.task,

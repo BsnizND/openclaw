@@ -132,8 +132,13 @@ describe("createGatewaySubagentRuntime.run subagent_ended tracking (#59164)", ()
     expect(request.req.method).toBe("agent");
     expect(request.req.params).toMatchObject({
       sessionKey: "agent:main:dashboard:incognito-plugin-child",
-      sourceSessionKey: "agent:main:lifeos-home:requester",
+      inputProvenance: {
+        kind: "internal_system",
+        sourceSessionKey: "agent:main:lifeos-home:requester",
+        sourceTool: "plugin_subagent",
+      },
     });
+    expect(request.req.params).not.toHaveProperty("sourceSessionKey");
   });
 
   test("does not dispatch when no runtime config is available", async () => {

@@ -293,6 +293,7 @@ export async function prepareAgentRunDispatch(params: {
         runId: params.runId,
         childSessionKey: params.resolvedSessionKey,
         task: params.request.message.trim(),
+        requesterSessionKey: params.inputProvenance?.sourceSessionKey,
         requesterOrigin: normalizeDeliveryContext({
           channel: params.delivery.resolvedChannel,
           to: params.delivery.resolvedTo,
