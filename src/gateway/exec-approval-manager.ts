@@ -80,6 +80,8 @@ export type ExecApprovalRecord<TPayload = ExecApprovalRequestPayload> = {
   request: TPayload;
   createdAtMs: number;
   expiresAtMs: number;
+  /** Incognito approvals stay in this manager and never enter the shared state DB. */
+  persistenceMode?: "ephemeral";
   // Caller metadata (best-effort). Used to prevent other clients from replaying an approval id.
   requestedByConnId?: string | null;
   requestedByDeviceId?: string | null;
@@ -214,10 +216,11 @@ function attachLiveRecord<TPayload, TResult extends { outcome: string }>(
   } as WithLiveRecord<TResult, TPayload>;
 }
 
-// Without `persistence` the manager runs process-local-only. Gateway
-// production always injects persistence (server-aux-handlers); local mode
-// exists for unit tests and is slated for removal once the embedded broker
-// migrates onto the durable store — do not grow it new behavior.
+// Without `persistence` the whole manager runs process-local-only. Gateway
+// production always injects persistence (server-aux-handlers); that legacy
+// manager mode exists for unit tests and is slated for removal once the
+// embedded broker migrates onto the durable store. Incognito approvals use
+// the distinct per-record `persistenceMode` below.
 export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
   private pending = new Map<string, PendingEntry<TPayload>>();
 
@@ -231,7 +234,12 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     return this.options.persistence?.runtimeEpoch ?? null;
   }
 
-  create(request: TPayload, timeoutMs: number, id?: string | null): ExecApprovalRecord<TPayload> {
+  create(
+    request: TPayload,
+    timeoutMs: number,
+    id?: string | null,
+    options?: { persistenceMode?: "ephemeral" },
+  ): ExecApprovalRecord<TPayload> {
     const now = Date.now();
     const resolvedTimeoutMs = resolveApprovalTimeoutMs(timeoutMs);
     const expiresAtMs = resolveExpiresAtMsFromDurationMs(resolvedTimeoutMs, { nowMs: now });
@@ -255,8 +263,15 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
       request,
       createdAtMs: now,
       expiresAtMs,
+      ...(options?.persistenceMode ? { persistenceMode: options.persistenceMode } : {}),
     };
     return record;
+  }
+
+  private persistenceFor(
+    record: ExecApprovalRecord<TPayload> | undefined,
+  ): OperatorApprovalPersistenceRuntime | undefined {
+    return record?.persistenceMode === "ephemeral" ? undefined : this.options.persistence;
   }
 
   /**
@@ -268,20 +283,21 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     record: ExecApprovalRecord<TPayload>,
     _timeoutMs: number,
   ): Promise<ExecApprovalDecision | null> {
-    const persistence = this.options.persistence;
-    const allowedDecisions = persistence
+    const persistence = this.persistenceFor(record);
+    const needsPresentation = Boolean(persistence || record.persistenceMode === "ephemeral");
+    const allowedDecisions = needsPresentation
       ? normalizeAllowedDecisions(this.options.resolveAllowedDecisions?.(record.request))
       : null;
-    const presentation = persistence
+    const presentation = needsPresentation
       ? buildApprovalPresentation({
           kind: this.approvalKind,
           request: record.request,
           allowedDecisions: allowedDecisions ?? [],
         })
       : null;
-    if (persistence && !presentation) {
-      // No durable row or live waiter may exist without a safe prompt that every
-      // reviewer surface can render; otherwise an approval could be unreviewable.
+    if (needsPresentation && !presentation) {
+      // No live waiter may exist without a safe prompt that every reviewer
+      // surface can render; otherwise an approval could be unreviewable.
       throw new Error("approval cannot be persisted without a valid reviewer presentation");
     }
 
@@ -356,6 +372,11 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     this.scheduleExpiryTimer(entry);
     if (insertedRecord) {
       this.emitLifecycle({ phase: "pending", record: insertedRecord });
+    } else if (record.persistenceMode === "ephemeral") {
+      const projected = this.projectLocalRecord(record);
+      if (projected) {
+        this.emitLifecycle({ phase: "pending", record: projected });
+      }
     }
     return promise;
   }
@@ -399,7 +420,10 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
       reviewerDeviceIds: record.approvalReviewerDeviceIds ?? [],
       source,
       audienceSessionKeys: source.sessionKey ? [source.sessionKey] : [],
-      runtimeEpoch: this.runtimeEpoch ?? "process-local",
+      runtimeEpoch:
+        record.persistenceMode === "ephemeral"
+          ? "process-local"
+          : (this.runtimeEpoch ?? "process-local"),
       createdAtMs: record.createdAtMs,
       expiresAtMs: record.expiresAtMs,
       updatedAtMs: record.resolvedAtMs ?? record.createdAtMs,
@@ -423,8 +447,8 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     localResolvedBy: string | null = null,
     localResolutionSource: ExecApprovalResolutionSource = "operator",
   ): ExecApprovalResolveResult<TPayload> {
-    const persistence = this.options.persistence;
     const localEntry = this.pending.get(recordId);
+    const persistence = this.persistenceFor(localEntry?.record);
     if (localEntry?.record.terminalReason === "storage-corrupt") {
       const repaired = this.persistStorageCorruptDeny(recordId);
       if (repaired.outcome === "expired") {
@@ -471,8 +495,11 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
           ? { outcome: "decision-not-allowed", record, liveRecord: localEntry.record }
           : { outcome: "corrupt" };
       }
-      this.resolveLocal(recordId, decision, localResolvedBy);
+      this.resolveLocal(recordId, decision, localResolvedBy, localResolutionSource);
       const record = this.projectLocalRecord(localEntry.record);
+      if (record && localEntry.record.persistenceMode === "ephemeral") {
+        this.emitLifecycle({ phase: "terminal", record });
+      }
       return record
         ? { outcome: "resolved", record, liveRecord: localEntry.record }
         : { outcome: "corrupt" };
@@ -525,8 +552,8 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     requireDue = false,
     localResolvedBy: string | null = null,
   ): ExecApprovalForceDenyResult<TPayload> {
-    const persistence = this.options.persistence;
     const localRecord = this.pending.get(recordId)?.record;
+    const persistence = this.persistenceFor(localRecord);
     if (localRecord?.terminalReason === "storage-corrupt") {
       return this.persistStorageCorruptDeny(recordId);
     }
@@ -552,6 +579,9 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
         terminalReason: reason,
       });
       const record = this.projectLocalRecord(entry.record);
+      if (record && entry.record.persistenceMode === "ephemeral") {
+        this.emitLifecycle({ phase: "terminal", record });
+      }
       return record
         ? { outcome: "denied", record, liveRecord: entry.record }
         : { outcome: "corrupt" };
@@ -846,12 +876,17 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     if (!entry || entry.record.resolvedAtMs !== undefined) {
       return false;
     }
-    if (!this.options.persistence) {
+    if (!this.persistenceFor(entry.record)) {
       if (entry.record.expiresAtMs > Date.now()) {
         this.scheduleExpiryTimer(entry);
         return false;
       }
-      return this.expireLocal(recordId, null);
+      const expired = this.expireLocal(recordId, null);
+      const projected = this.projectLocalRecord(entry.record);
+      if (expired && projected && entry.record.persistenceMode === "ephemeral") {
+        this.emitLifecycle({ phase: "terminal", record: projected });
+      }
+      return expired;
     }
     const result = this.forceDenyDetailed(
       recordId,
@@ -914,7 +949,8 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
   }
 
   resolve(recordId: string, decision: ExecApprovalDecision, resolvedBy?: string | null): boolean {
-    if (!this.options.persistence) {
+    const record = this.pending.get(recordId)?.record;
+    if (!this.options.persistence && record?.persistenceMode !== "ephemeral") {
       return this.resolveLocal(recordId, decision, resolvedBy ?? null);
     }
     return (
@@ -936,7 +972,8 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
    * record more strictly than an operator decision (see #103515).
    */
   resolveAutoReview(recordId: string, resolvedBy?: string | null): boolean {
-    if (!this.options.persistence) {
+    const record = this.pending.get(recordId)?.record;
+    if (!this.options.persistence && record?.persistenceMode !== "ephemeral") {
       return this.resolveLocal(recordId, "allow-once", resolvedBy ?? null, "auto-review");
     }
     return (
@@ -979,7 +1016,8 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
   }
 
   expire(recordId: string, resolvedBy?: string | null): boolean {
-    if (!this.options.persistence) {
+    const record = this.pending.get(recordId)?.record;
+    if (!this.options.persistence && record?.persistenceMode !== "ephemeral") {
       return this.expireLocal(recordId, resolvedBy ?? null);
     }
     const noRoute = resolvedBy === "no-approval-route";
@@ -1034,6 +1072,12 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     return entry.record;
   }
 
+  /** Projects an incognito approval without consulting or writing durable state. */
+  getEphemeralOperatorRecord(recordId: string): OperatorApprovalRecord | null {
+    const record = this.getSnapshot(recordId);
+    return record?.persistenceMode === "ephemeral" ? this.projectLocalRecord(record) : null;
+  }
+
   listPendingRecords(): ExecApprovalRecord<TPayload>[] {
     const nowMs = Date.now();
     for (const entry of this.pending.values()) {
@@ -1065,7 +1109,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     ) {
       return false;
     }
-    const persistence = this.options.persistence;
+    const persistence = this.persistenceFor(entry.record);
     if (persistence) {
       const result = consumeOperatorApprovalAllowOnce({
         id: recordId,

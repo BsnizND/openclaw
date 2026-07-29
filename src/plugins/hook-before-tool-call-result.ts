@@ -16,6 +16,8 @@ export type PluginHookBeforeToolCallResult = {
   requireApproval?: {
     title: string;
     description: string;
+    /** Reviewer-only structured detail for native approval surfaces. */
+    detail?: string;
     severity?: "info" | "warning" | "critical";
     timeoutMs?: number;
     /**

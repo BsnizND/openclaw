@@ -14,6 +14,11 @@ type PluginRuntimeChannel = import("./types-channel.js").PluginRuntimeChannel;
 
 type SubagentRunParams = {
   sessionKey: string;
+  /**
+   * Native requester session whose approval audience and task ownership should
+   * follow this child run. The Gateway validates the relationship.
+   */
+  sourceSessionKey?: string;
   message: string;
   /** Add exact tools registered by the calling plugin to the worker's normal tool surface. */
   toolsAlsoAllow?: string[];
