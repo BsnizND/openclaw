@@ -92,15 +92,17 @@ export function createSubagentRegistryLifecycleCleanup(
     const failedDelivery = ensureDeliveryState(giveUpParams.entry);
     failedDelivery.status = "failed";
     failedDelivery.lastError = deliveryError;
-    safeSetSubagentTaskDeliveryStatus({
-      entry: giveUpParams.entry,
-      deliveryStatus: "failed",
-      deliveryError,
-    });
-    safeMarkRequiredCompletionDeliveryBlocked({
-      entry: giveUpParams.entry,
-      reason: deliveryError,
-    });
+    if (giveUpParams.entry.requesterTurnYielded !== true) {
+      safeSetSubagentTaskDeliveryStatus({
+        entry: giveUpParams.entry,
+        deliveryStatus: "failed",
+        deliveryError,
+      });
+      safeMarkRequiredCompletionDeliveryBlocked({
+        entry: giveUpParams.entry,
+        reason: deliveryError,
+      });
+    }
     giveUpParams.entry.wakeOnDescendantSettle = undefined;
     const completion = ensureCompletionState(giveUpParams.entry);
     completion.fallbackResultText = undefined;
