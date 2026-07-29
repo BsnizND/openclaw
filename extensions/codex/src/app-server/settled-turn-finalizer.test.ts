@@ -193,6 +193,72 @@ describe("runCodexSettledTurnFinalization", () => {
     });
   });
 
+  it("accepts the isolated turn's exact prompt echo", async () => {
+    mocks.runBounded.mockResolvedValue({
+      text: "The update was sent successfully.",
+      items: [
+        {
+          id: "prompt-echo",
+          type: "userMessage",
+          text: "Produce the final user-visible answer now.",
+        },
+        { id: "answer", type: "agentMessage", text: "The update was sent successfully." },
+      ],
+      model: "gpt-5.4",
+    });
+
+    await expect(
+      runCodexSettledTurnFinalization(
+        { attempt: createAttempt(), settledAttempt: createSettledAttempt() },
+        {},
+      ),
+    ).resolves.toMatchObject({ assistantTranscriptOwned: true });
+    expect(mocks.mirror).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a mismatched prompt echo before transcript mutation", async () => {
+    mocks.runBounded.mockResolvedValue({
+      text: "The update was sent successfully.",
+      items: [{ id: "prompt-echo", type: "userMessage", text: "Different prompt." }],
+      model: "gpt-5.4",
+    });
+
+    await expect(
+      runCodexSettledTurnFinalization(
+        { attempt: createAttempt(), settledAttempt: createSettledAttempt() },
+        {},
+      ),
+    ).rejects.toThrow("unexpected native item: userMessage");
+    expect(mocks.mirror).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate exact prompt echoes before transcript mutation", async () => {
+    mocks.runBounded.mockResolvedValue({
+      text: "The update was sent successfully.",
+      items: [
+        {
+          id: "prompt-echo-1",
+          type: "userMessage",
+          text: "Produce the final user-visible answer now.",
+        },
+        {
+          id: "prompt-echo-2",
+          type: "userMessage",
+          text: "Produce the final user-visible answer now.",
+        },
+      ],
+      model: "gpt-5.4",
+    });
+
+    await expect(
+      runCodexSettledTurnFinalization(
+        { attempt: createAttempt(), settledAttempt: createSettledAttempt() },
+        {},
+      ),
+    ).rejects.toThrow("unexpected native item: userMessage");
+    expect(mocks.mirror).not.toHaveBeenCalled();
+  });
+
   it("rejects an empty final answer before transcript mutation", async () => {
     mocks.runBounded.mockResolvedValue({ text: " ", items: [], model: "gpt-5.4" });
 

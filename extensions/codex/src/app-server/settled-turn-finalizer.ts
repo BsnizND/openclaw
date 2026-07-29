@@ -50,7 +50,17 @@ export async function runCodexSettledTurnFinalization(
     historyItems,
     requireNoExternalCapabilities: true,
   });
-  const unexpectedItem = bounded.items.find((item) => !FINALIZER_PASSIVE_ITEM_TYPES.has(item.type));
+  let sawExpectedPromptEcho = false;
+  const unexpectedItem = bounded.items.find((item) => {
+    if (FINALIZER_PASSIVE_ITEM_TYPES.has(item.type)) {
+      return false;
+    }
+    if (item.type === "userMessage" && !sawExpectedPromptEcho && item.text === attempt.prompt) {
+      sawExpectedPromptEcho = true;
+      return false;
+    }
+    return true;
+  });
   if (unexpectedItem) {
     throw new Error(
       `Codex settled-turn finalization returned unexpected native item: ${unexpectedItem.type}`,
