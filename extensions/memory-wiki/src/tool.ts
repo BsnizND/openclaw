@@ -158,7 +158,6 @@ export function createWikiSearchTool(
         corpus?: ResolvedMemoryWikiConfig["search"]["corpus"];
         mode?: (typeof WIKI_SEARCH_MODES)[number];
       };
-      await syncImportedSourcesIfNeeded(config, appConfig);
       const results = await searchMemoryWiki({
         config,
         appConfig,
@@ -245,10 +244,11 @@ export function createWikiApplyTool(
       await syncImportedSourcesIfNeeded(config, appConfig);
       const result = await applyMemoryWikiMutation({ config, mutation });
       const action = result.changed ? "Updated" : "No changes for";
-      const compileSummary =
-        result.compile.updatedFiles.length > 0
+      const compileSummary = result.compile
+        ? result.compile.updatedFiles.length > 0
           ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.`
-          : "Indexes unchanged.";
+          : "Indexes unchanged."
+        : "Indexes already current.";
       return {
         content: [
           {
@@ -281,7 +281,6 @@ export function createWikiGetTool(
         backend?: ResolvedMemoryWikiConfig["search"]["backend"];
         corpus?: ResolvedMemoryWikiConfig["search"]["corpus"];
       };
-      await syncImportedSourcesIfNeeded(config, appConfig);
       const result = await getMemoryWikiPage({
         config,
         appConfig,

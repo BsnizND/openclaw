@@ -391,7 +391,12 @@ function formatMemoryWikiMutationSummary(result: MemoryWikiMutationResult, json?
   if (json) {
     return JSON.stringify(result, null, 2);
   }
-  return `${result.changed ? "Updated" : "No changes for"} ${result.pagePath} via ${result.operation}. ${result.compile.updatedFiles.length > 0 ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.` : "Indexes unchanged."}`;
+  const compileSummary = result.compile
+    ? result.compile.updatedFiles.length > 0
+      ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.`
+      : "Indexes unchanged."
+    : "Indexes already current.";
+  return `${result.changed ? "Updated" : "No changes for"} ${result.pagePath} via ${result.operation}. ${compileSummary}`;
 }
 
 function formatJsonOrText<T>(
@@ -641,7 +646,6 @@ async function runWikiSearch(params: {
   if (params.mode && !(WIKI_SEARCH_MODES as readonly string[]).includes(params.mode)) {
     throw new Error(`wiki search --mode must be one of: ${WIKI_SEARCH_MODES.join(", ")}.`);
   }
-  await syncMemoryWikiImportedSources({ config: params.config, appConfig: params.appConfig });
   const results = await searchMemoryWiki({
     config: params.config,
     appConfig: params.appConfig,
@@ -678,7 +682,6 @@ async function runWikiGet(params: {
   json?: boolean;
   stdout?: Pick<NodeJS.WriteStream, "write">;
 }) {
-  await syncMemoryWikiImportedSources({ config: params.config, appConfig: params.appConfig });
   const result = await getMemoryWikiPage({
     config: params.config,
     appConfig: params.appConfig,

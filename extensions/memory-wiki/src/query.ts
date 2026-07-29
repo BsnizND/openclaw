@@ -29,13 +29,15 @@ import {
 import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
 import {
   parseWikiMarkdown,
+  slugifyWikiPageStem,
   toWikiPageSummary,
   type WikiClaim,
   type WikiPageSummary,
 } from "./markdown.js";
-import { initializeMemoryWikiVault } from "./vault.js";
+import { ensureMemoryWikiVaultScaffold } from "./vault.js";
 
 const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
+const SEMANTIC_QUERY_DIRS = ["entities", "concepts", "syntheses"] as const;
 const QUERY_PAGE_READ_CONCURRENCY = 16;
 const RELATED_BLOCK_PATTERN =
   /<!-- openclaw:wiki:related:start -->[\s\S]*?<!-- openclaw:wiki:related:end -->/g;
@@ -207,10 +209,13 @@ function mergeWikiSearchCorpusResults(params: {
   return sortWikiSearchResults(selected).slice(0, params.maxResults);
 }
 
-async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
+async function listWikiMarkdownFiles(
+  rootDir: string,
+  relativeDirs: readonly (typeof QUERY_DIRS)[number][] = QUERY_DIRS,
+): Promise<string[]> {
   const files = (
     await Promise.all(
-      QUERY_DIRS.map(async (relativeDir) => {
+      relativeDirs.map(async (relativeDir) => {
         const dirPath = path.join(rootDir, relativeDir);
         const entries = await fs
           .readdir(dirPath, { withFileTypes: true, recursive: true })
@@ -356,6 +361,18 @@ function buildRouteQuestionTokens(queryLower: string): string[] {
   return routedTokens.length > 0 ? routedTokens : tokens;
 }
 
+function countMatchingQueryTokens(searchText: string, queryTokens: readonly string[]): number {
+  return queryTokens.filter((token) => searchText.includes(token)).length;
+}
+
+function hasStrongQueryTokenCoverage(searchText: string, queryTokens: readonly string[]): boolean {
+  if (queryTokens.length < 2) {
+    return false;
+  }
+  const requiredMatches = Math.max(2, Math.ceil(queryTokens.length * 0.7));
+  return countMatchingQueryTokens(searchText, queryTokens) >= requiredMatches;
+}
+
 function lineMatchesQuery(lineLower: string, queryLower: string, queryTokens: string[]): boolean {
   if (queryLower.length > 0 && lineLower.includes(queryLower)) {
     return true;
@@ -416,7 +433,14 @@ function isClaimTextOrIdMatch(
   if (lineMatchesQuery(textLower, queryLower, [...queryTokens])) {
     return true;
   }
-  return lineMatchesQuery(normalizeLowercaseStringOrEmpty(claim.id), queryLower, [...queryTokens]);
+  if (hasStrongQueryTokenCoverage(textLower, queryTokens)) {
+    return true;
+  }
+  const idLower = normalizeLowercaseStringOrEmpty(claim.id);
+  return (
+    lineMatchesQuery(idLower, queryLower, [...queryTokens]) ||
+    hasStrongQueryTokenCoverage(idLower, queryTokens)
+  );
 }
 
 function scoreClaimMatch(params: {
@@ -438,6 +462,11 @@ function scoreClaimMatch(params: {
     )
   ) {
     score += 18;
+  } else if (
+    params.queryTokens?.length &&
+    hasStrongQueryTokenCoverage(normalizeLowercaseStringOrEmpty(params.text), params.queryTokens)
+  ) {
+    score += 14;
   }
   if (normalizeLowercaseStringOrEmpty(params.id).includes(params.queryLower)) {
     score += 10;
@@ -735,8 +764,11 @@ function buildDigestCandidatePaths(params: {
       const metadataLower = normalizeLowercaseStringOrEmpty(
         buildDigestPageSearchText(page, claims),
       );
+      const hasAllTokens =
+        queryTokens.length > 0 && queryTokens.every((token) => metadataLower.includes(token));
       if (
         !metadataLower.includes(queryLower) &&
+        !hasAllTokens &&
         !(
           params.mode === "route-question" &&
           hasRouteQuestionMatch(buildDigestRouteQuestionFields(page), queryLower)
@@ -848,10 +880,11 @@ function scorePage(page: QueryableWikiPage, query: string, mode: WikiSearchMode)
     rawLower.includes(queryLower);
   const hasAllTokens =
     queryTokens.length > 0 && queryTokens.every((token) => combinedLower.includes(token));
+  const hasStrongTokenCoverage = hasStrongQueryTokenCoverage(combinedLower, queryTokens);
   const hasModeMatch =
     mode === "route-question" &&
     hasRouteQuestionMatch(buildPageRouteQuestionFields(page), queryLower);
-  if (!hasExactMatch && !hasAllTokens && !hasModeMatch) {
+  if (!hasExactMatch && !hasAllTokens && !hasStrongTokenCoverage && !hasModeMatch) {
     return 0;
   }
 
@@ -1348,9 +1381,20 @@ async function searchWikiCorpus(params: {
   maxResults: number;
   mode: WikiSearchMode;
 }): Promise<WikiSearchResult[]> {
-  const digest = await readQueryDigestBundle(params.config);
   const rootDir = params.config.vault.path;
-  const candidatePaths = digest
+  // Ordinary recall reads current semantic pages directly. Raw source pages
+  // remain available through explicit source-evidence mode, but they are not a
+  // compiled or filesystem shadow fallback for active knowledge.
+  if (params.mode !== "source-evidence") {
+    const semanticPaths = await listWikiMarkdownFiles(rootDir, SEMANTIC_QUERY_DIRS);
+    const semanticPages = await readQueryableWikiPagesByPaths(rootDir, semanticPaths);
+    return semanticPages
+      .map((page) => toWikiSearchResult(page, params.query, params.mode))
+      .filter((page) => page.score > 0);
+  }
+
+  const digest = await readQueryDigestBundle(params.config);
+  const digestCandidatePaths = digest
     ? buildDigestCandidatePaths({
         digest,
         query: params.query,
@@ -1358,6 +1402,7 @@ async function searchWikiCorpus(params: {
         mode: params.mode,
       })
     : [];
+  const candidatePaths = digestCandidatePaths;
   const seenPaths = new Set<string>();
   const candidatePages =
     candidatePaths.length > 0
@@ -1370,7 +1415,7 @@ async function searchWikiCorpus(params: {
   const results = candidatePages
     .map((page) => toWikiSearchResult(page, params.query, params.mode))
     .filter((page) => page.score > 0);
-  if (candidatePaths.length === 0 || results.length >= params.maxResults) {
+  if (results.length >= params.maxResults) {
     return results;
   }
 
@@ -1391,6 +1436,69 @@ function resolveDigestClaimLookup(digest: QueryDigestBundle, lookup: string): st
   const claimId = trimmed.replace(/^claim:/i, "");
   const match = digest.claims.find((claim) => claim.id === claimId);
   return match?.pagePath ?? null;
+}
+
+function resolveDigestPageLookup(digest: QueryDigestBundle, lookup: string): string | null {
+  const key = normalizeLookupKey(lookup);
+  const withExtension = key.endsWith(".md") ? key : `${key}.md`;
+  const match =
+    digest.pages.find((page) => page.path === key) ??
+    digest.pages.find((page) => page.path === withExtension) ??
+    digest.pages.find((page) => page.path.replace(/\.md$/i, "") === key) ??
+    digest.pages.find((page) => path.basename(page.path, ".md") === key) ??
+    digest.pages.find((page) => page.id === key);
+  return match?.path ?? null;
+}
+
+function resolveCanonicalPageIdPath(lookup: string): string | null {
+  const match = lookup.trim().match(/^(entity|concept|source|synthesis|report)\.(.+)$/);
+  if (!match) {
+    return null;
+  }
+  const directoryByKind = {
+    entity: "entities",
+    concept: "concepts",
+    source: "sources",
+    synthesis: "syntheses",
+    report: "reports",
+  } as const;
+  const kind = match[1] as keyof typeof directoryByKind;
+  const idTail = match[2]?.trim();
+  if (!idTail) {
+    return null;
+  }
+  return `${directoryByKind[kind]}/${slugifyWikiPageStem(idTail)}.md`;
+}
+
+function resolveDirectWikiPagePath(lookup: string): string | null {
+  const normalized = normalizeLookupKey(lookup);
+  const withExtension = normalized.endsWith(".md") ? normalized : `${normalized}.md`;
+  const segments = withExtension.split("/");
+  if (
+    path.posix.isAbsolute(withExtension) ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..") ||
+    !QUERY_DIRS.includes(segments[0] as (typeof QUERY_DIRS)[number])
+  ) {
+    return null;
+  }
+  return withExtension;
+}
+
+async function readQueryableWikiPageByPathIfPresent(
+  rootDir: string,
+  relativePath: string | null,
+): Promise<QueryableWikiPage | null> {
+  if (!relativePath) {
+    return null;
+  }
+  try {
+    return (await readQueryableWikiPagesByPaths(rootDir, [relativePath]))[0] ?? null;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function resolveQueryableWikiPageByLookup(
@@ -1430,7 +1538,7 @@ export async function searchMemoryWiki(params: {
     sandboxed: params.sandboxed,
     operation: "wiki_search",
   });
-  await initializeMemoryWikiVault(effectiveConfig);
+  await ensureMemoryWikiVaultScaffold(effectiveConfig);
   const maxResults = normalizePositiveInteger(params.maxResults, 10);
   const mode = params.mode ?? "auto";
 
@@ -1500,22 +1608,37 @@ export async function getMemoryWikiPage(params: {
     sandboxed: params.sandboxed,
     operation: "wiki_get",
   });
-  await initializeMemoryWikiVault(effectiveConfig);
+  await ensureMemoryWikiVaultScaffold(effectiveConfig);
   const fromLine = normalizePositiveInteger(params.fromLine, 1);
   const lineCount = normalizePositiveInteger(params.lineCount, 200);
 
   if (shouldSearchWiki(effectiveConfig)) {
-    const digest = await readQueryDigestBundle(effectiveConfig);
-    const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
-    const digestLookupPage = digestClaimPagePath
-      ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
-        )[0] ?? null)
-      : null;
-    const pages = digestLookupPage
-      ? [digestLookupPage]
-      : await readQueryableWikiPages(effectiveConfig.vault.path);
-    const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
+    const directLookupPageCandidate = await readQueryableWikiPageByPathIfPresent(
+      effectiveConfig.vault.path,
+      resolveCanonicalPageIdPath(params.lookup) ?? resolveDirectWikiPagePath(params.lookup),
+    );
+    const directLookupPage =
+      directLookupPageCandidate &&
+      resolveQueryableWikiPageByLookup([directLookupPageCandidate], params.lookup)
+        ? directLookupPageCandidate
+        : null;
+    const digest = directLookupPage ? null : await readQueryDigestBundle(effectiveConfig);
+    const digestLookupPage = await readQueryableWikiPageByPathIfPresent(
+      effectiveConfig.vault.path,
+      digest
+        ? (resolveDigestClaimLookup(digest, params.lookup) ??
+            resolveDigestPageLookup(digest, params.lookup))
+        : null,
+    );
+    const pages = directLookupPage
+      ? [directLookupPage]
+      : digestLookupPage
+        ? [digestLookupPage]
+        : await readQueryableWikiPages(effectiveConfig.vault.path);
+    const page =
+      directLookupPage ??
+      digestLookupPage ??
+      resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);
       const lines = parsed.body.split(/\r?\n/);

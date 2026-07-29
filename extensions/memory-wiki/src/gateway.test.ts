@@ -1,13 +1,17 @@
 // Memory Wiki tests cover gateway plugin behavior.
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyMemoryWikiMutation, normalizeMemoryWikiMutationInput } from "./apply.js";
+import {
+  applyMemoryWikiMutation,
+  applyMemoryWikiMutations,
+  normalizeMemoryWikiMutationInput,
+} from "./apply.js";
 import { registerMemoryWikiGatewayMethods } from "./gateway.js";
 import { listMemoryWikiImportInsights } from "./import-insights.js";
 import { listMemoryWikiImportRuns } from "./import-runs.js";
 import { ingestMemoryWikiSource } from "./ingest.js";
 import { listMemoryWikiPalace } from "./memory-palace.js";
-import { searchMemoryWiki } from "./query.js";
+import { getMemoryWikiPage, searchMemoryWiki } from "./query.js";
 import { syncMemoryWikiImportedSources } from "./source-sync.js";
 import { resolveMemoryWikiStatus } from "./status.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
@@ -16,6 +20,7 @@ type ApplyMemoryWikiMutation = ReturnType<typeof normalizeMemoryWikiMutationInpu
 
 vi.mock("./apply.js", () => ({
   applyMemoryWikiMutation: vi.fn(),
+  applyMemoryWikiMutations: vi.fn(),
   normalizeMemoryWikiMutationInput: vi.fn(),
 }));
 
@@ -181,10 +186,22 @@ describe("memory-wiki gateway methods", () => {
       operation: "create_synthesis",
       pagePath: "syntheses/gateway-alpha.md",
     } as never);
+    vi.mocked(applyMemoryWikiMutations).mockResolvedValue({
+      changed: true,
+      results: [
+        {
+          changed: true,
+          operation: "create_synthesis",
+          pagePath: "syntheses/gateway-alpha.md",
+          pageId: "synthesis.gateway-alpha",
+        },
+      ],
+    } as never);
     vi.mocked(searchMemoryWiki).mockResolvedValue({
       items: [],
       total: 0,
     } as never);
+    vi.mocked(getMemoryWikiPage).mockResolvedValue(null);
   });
 
   it("registers Obsidian CLI methods with write scope", async () => {
@@ -719,10 +736,44 @@ describe("memory-wiki gateway methods", () => {
       searchCorpus: "wiki",
       mode: "route-question",
     });
+    expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
     expect(readRespondPayload(respond)).toEqual({
       items: [],
       total: 0,
     });
+  });
+
+  it("reads wiki.get without synchronizing imported sources", async () => {
+    const { config } = await createVault({ prefix: "memory-wiki-gateway-" });
+    const { api, registerGatewayMethod } = createPluginApi();
+
+    registerMemoryWikiGatewayMethods({ api, config });
+    const handler = findGatewayHandler(registerGatewayMethod, "wiki.get");
+    if (!handler) {
+      throw new Error("wiki.get handler missing");
+    }
+    const respond = vi.fn();
+
+    await handler({
+      params: {
+        lookup: "synthesis.preference-memory-active-catalog",
+        corpus: "wiki",
+        backend: "local",
+      },
+      respond,
+    });
+
+    expect(getMemoryWikiPage).toHaveBeenCalledWith({
+      config,
+      appConfig: undefined,
+      lookup: "synthesis.preference-memory-active-catalog",
+      fromLine: undefined,
+      lineCount: undefined,
+      searchBackend: "local",
+      searchCorpus: "wiki",
+    });
+    expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
+    expect(readRespondPayload(respond)).toBeNull();
   });
 
   it("passes the default agent scope to shared wiki.search gateway calls", async () => {
@@ -840,6 +891,55 @@ describe("memory-wiki gateway methods", () => {
     expect(readRespondPayload(respond)).toEqual({
       operation: "create_synthesis",
       pagePath: "syntheses/gateway-alpha.md",
+    });
+  });
+
+  it("applies a wiki mutation batch over one gateway call", async () => {
+    const { config } = await createVault({ prefix: "memory-wiki-gateway-" });
+    const { api, registerGatewayMethod } = createPluginApi();
+
+    registerMemoryWikiGatewayMethods({ api, config });
+    const handler = findGatewayHandler(registerGatewayMethod, "wiki.apply");
+    if (!handler) {
+      throw new Error("wiki.apply handler missing");
+    }
+    const respond = vi.fn();
+    const params = {
+      mutations: [
+        {
+          op: "create_synthesis",
+          title: "Gateway Alpha",
+          body: "Gateway summary.",
+          sourceIds: ["source.alpha"],
+        },
+      ],
+    };
+
+    await handler({
+      params,
+      respond,
+    });
+
+    expect(normalizeMemoryWikiMutationInput).toHaveBeenCalledWith(params.mutations[0]);
+    expect(applyMemoryWikiMutations).toHaveBeenCalledWith({
+      config,
+      mutations: [
+        {
+          op: "create_synthesis",
+          title: "Gateway Alpha",
+          body: "Gateway summary.",
+          sourceIds: ["source.alpha"],
+        },
+      ],
+    });
+    expect(applyMemoryWikiMutation).not.toHaveBeenCalled();
+    expect(readRespondPayload(respond)).toMatchObject({
+      changed: true,
+      results: [
+        {
+          pagePath: "syntheses/gateway-alpha.md",
+        },
+      ],
     });
   });
 });

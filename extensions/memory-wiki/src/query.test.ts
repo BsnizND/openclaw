@@ -172,6 +172,86 @@ function createMemoryManager(overrides?: {
 }
 
 describe("getMemoryWikiPage", () => {
+  it("reads an exact canonical page id without a compiled cache or vault scan", async () => {
+    const { rootDir, config } = await createQueryVault({ initialize: true });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "lifeos-topic-media-timeline.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "synthesis.lifeos-topic-media-timeline",
+          title: "LifeOS topic: media-timeline",
+        },
+        body: "# LifeOS topic: media-timeline\n\nCurrent projection.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "unrelated.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.unrelated",
+          title: "Unrelated",
+        },
+        body: "# Unrelated\n\nMust not be read.\n",
+      }),
+      "utf8",
+    );
+    const readdir = vi.spyOn(fs, "readdir");
+
+    await expect(
+      getMemoryWikiPage({
+        config,
+        lookup: "synthesis.lifeos-topic-media-timeline",
+      }),
+    ).resolves.toMatchObject({
+      path: "syntheses/lifeos-topic-media-timeline.md",
+      title: "LifeOS topic: media-timeline",
+      content: expect.stringContaining("Current projection."),
+    });
+    expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
+  });
+
+  it("reads an exact compiled page without scanning the vault", async () => {
+    const { rootDir, config } = await createQueryVault({ initialize: true });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "media-timeline.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "media-timeline",
+          title: "Media Timeline",
+        },
+        body: "# Media Timeline\n\nCurrent projection.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "unrelated.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.unrelated",
+          title: "Unrelated",
+        },
+        body: "# Unrelated\n\nMust not be read.\n",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+    const readdir = vi.spyOn(fs, "readdir");
+
+    await expect(getMemoryWikiPage({ config, lookup: "media-timeline" })).resolves.toMatchObject({
+      path: "syntheses/media-timeline.md",
+      title: "Media Timeline",
+      content: expect.stringContaining("Current projection."),
+    });
+    expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
+  });
+
   it("enforces visibility for all current session storage layouts", async () => {
     const { config } = await createQueryVault({
       initialize: true,
@@ -232,7 +312,7 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "alpha" });
+    const results = await searchMemoryWiki({ config, query: "alpha", mode: "source-evidence" });
 
     expect(results).toHaveLength(1);
     expect(results[0]?.corpus).toBe("wiki");
@@ -267,7 +347,11 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "needle" });
+    const results = await searchMemoryWiki({
+      config,
+      query: "needle",
+      mode: "source-evidence",
+    });
 
     expect(collectWikiResultPaths(results)).toEqual(["sources/healthy.md"]);
   });
@@ -289,6 +373,7 @@ describe("searchMemoryWiki", () => {
       config,
       query: "alpha",
       maxResults: Number.NaN,
+      mode: "source-evidence",
     });
 
     expect(results).toHaveLength(1);
@@ -381,6 +466,158 @@ describe("searchMemoryWiki", () => {
 
     expect(results.map((result) => result.path)).toEqual(["entities/brad.md"]);
     expect(results[0]?.snippet).toContain("Teams");
+  });
+
+  it("searches current semantic pages when query terms are dispersed across metadata", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "all-well.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "synthesis.preference-memory-active-catalog",
+          title: "Active preference catalog",
+          claims: [
+            {
+              id: "claim.all-well.effort",
+              text: "All Well is not a low-effort default.",
+              status: "supported",
+              evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
+            },
+            {
+              id: "claim.all-well.energy",
+              text: "Brian may be tired after a demanding day.",
+              status: "supported",
+              evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
+            },
+          ],
+        },
+        body: "# Active preference catalog\n\nCurrent correction-backed synthesis.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "raw-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.raw-shadow",
+          title: "All Well exhausted low-effort raw shadow",
+        },
+        body: "# Raw shadow\n\nThis evidence page is not an active semantic answer.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "reports", "operational-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "report",
+          id: "report.operational-shadow",
+          title: "All Well exhausted low-effort operational report",
+        },
+        body: "# Operational report\n\nThis is not durable semantic memory.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "concepts", "one-token-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "concept",
+          id: "concept.one-token-shadow",
+          title: "All Well",
+        },
+        body: "# All Well\n\nA generic one-token overlap is not enough.\n",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+    const readFile = vi.spyOn(fs, "readFile");
+
+    const results = await searchMemoryWiki({
+      config,
+      query: "All Well exhausted low-effort",
+      maxResults: 5,
+    });
+
+    expect(results[0]?.path).toBe("syntheses/all-well.md");
+    expect(results.map((result) => result.path)).toContain("syntheses/all-well.md");
+    expect(results.map((result) => result.path)).not.toContain("concepts/one-token-shadow.md");
+    expect(results.map((result) => result.path)).not.toContain("sources/raw-shadow.md");
+    expect(
+      readFile.mock.calls.some(
+        ([file]) => typeof file === "string" && file.endsWith("sources/raw-shadow.md"),
+      ),
+    ).toBe(false);
+    expect(
+      readFile.mock.calls.some(
+        ([file]) => typeof file === "string" && file.endsWith("reports/operational-shadow.md"),
+      ),
+    ).toBe(false);
+    readFile.mockRestore();
+  });
+
+  it("searches active syntheses first while the compiled cache is unavailable", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "all-well.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "synthesis.preference-memory-active-catalog",
+          title: "Active preference catalog",
+          claims: [
+            {
+              id: "claim.all-well.effort",
+              text: "All Well is not a low-effort default.",
+              status: "supported",
+              evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
+            },
+            {
+              id: "claim.all-well.energy",
+              text: "Brian may be tired after a demanding day.",
+              status: "supported",
+              evidence: [{ sourceId: "context-wiki:preference-35cc2553" }],
+            },
+          ],
+        },
+        body: "# Active preference catalog\n\nCurrent correction-backed synthesis.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "raw-shadow.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.raw-shadow",
+          title: "All Well exhausted low-effort raw shadow",
+        },
+        body: "# Raw shadow\n\nMust not be read when active synthesis answers the query.\n",
+      }),
+      "utf8",
+    );
+    const readFile = vi.spyOn(fs, "readFile");
+
+    const results = await searchMemoryWiki({
+      config,
+      query: "All Well exhausted low-effort",
+      maxResults: 5,
+    });
+
+    expect(results[0]?.path).toBe("syntheses/all-well.md");
+    expect(results.map((result) => result.path)).not.toContain("sources/raw-shadow.md");
+    expect(
+      readFile.mock.calls.some(
+        ([file]) => typeof file === "string" && file.endsWith("sources/raw-shadow.md"),
+      ),
+    ).toBe(false);
+    readFile.mockRestore();
   });
 
   it("supports people-routing search modes and claim evidence drilldown metadata", async () => {
@@ -689,7 +926,11 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "alpha" });
+    const results = await searchMemoryWiki({
+      config,
+      query: "alpha",
+      mode: "source-evidence",
+    });
 
     expect(results).toHaveLength(1);
     expectFields(results[0], {
@@ -736,6 +977,7 @@ describe("searchMemoryWiki", () => {
       appConfig: createAppConfig(),
       query: "alpha",
       maxResults: 5,
+      mode: "source-evidence",
     });
 
     expect(results).toHaveLength(2);
@@ -1272,7 +1514,11 @@ describe("searchMemoryWiki", () => {
       "utf8",
     );
 
-    const results = await searchMemoryWiki({ config, query: "Source" });
+    const results = await searchMemoryWiki({
+      config,
+      query: "Source",
+      mode: "source-evidence",
+    });
 
     expect(results).toHaveLength(2);
     const paths = results.map((r) => r.path).toSorted();
@@ -1509,6 +1755,7 @@ describe("searchMemoryWiki", () => {
       config,
       appConfig: createAppConfig(),
       query: "alpha",
+      mode: "source-evidence",
     });
 
     expect(results).toHaveLength(1);
@@ -1531,6 +1778,7 @@ describe("getMemoryWikiPage", () => {
       "utf8",
     );
 
+    const readdir = vi.spyOn(fs, "readdir");
     const result = await getMemoryWikiPage({
       config,
       lookup: "sources/alpha.md",
@@ -1545,6 +1793,8 @@ describe("getMemoryWikiPage", () => {
     expect(result?.content).not.toContain("line three");
     expect(result?.totalLines).toBe(7);
     expect(result?.truncated).toBe(true);
+    expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
   });
 
   it("defaults non-finite wiki line options before slicing", async () => {

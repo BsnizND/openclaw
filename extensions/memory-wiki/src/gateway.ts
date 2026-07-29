@@ -3,7 +3,11 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { resolveDefaultAgentId } from "openclaw/plugin-sdk/memory-host-core";
 import { readPositiveIntegerParam } from "openclaw/plugin-sdk/param-readers";
 import type { OpenClawConfig, OpenClawPluginApi } from "../api.js";
-import { applyMemoryWikiMutation, normalizeMemoryWikiMutationInput } from "./apply.js";
+import {
+  applyMemoryWikiMutation,
+  applyMemoryWikiMutations,
+  normalizeMemoryWikiMutationInput,
+} from "./apply.js";
 import { compileMemoryWikiVault } from "./compile.js";
 import {
   resolveMemoryWikiAgentConfig,
@@ -315,7 +319,6 @@ export function registerMemoryWikiGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         const { agentId, appConfig, config } = resolveRequestContext(requestParams);
-        await syncImportedSourcesIfNeeded(config, appConfig);
         const query = readStringParam(requestParams, "query", { required: true });
         const maxResults = readPositiveIntegerParam(requestParams, "maxResults");
         const searchBackend = readEnumParam(requestParams, "backend", WIKI_SEARCH_BACKENDS);
@@ -347,6 +350,22 @@ export function registerMemoryWikiGatewayMethods(params: {
       try {
         const { appConfig, config } = resolveRequestContext(requestParams);
         await syncImportedSourcesIfNeeded(config, appConfig);
+        const mutationInputs = requestParams.mutations;
+        if (mutationInputs !== undefined) {
+          if (!Array.isArray(mutationInputs) || mutationInputs.length === 0) {
+            throw new Error("wiki.apply mutations must be a non-empty array.");
+          }
+          respond(
+            true,
+            await applyMemoryWikiMutations({
+              config,
+              mutations: mutationInputs.map((mutation) =>
+                normalizeMemoryWikiMutationInput(mutation),
+              ),
+            }),
+          );
+          return;
+        }
         respond(
           true,
           await applyMemoryWikiMutation({
@@ -366,7 +385,6 @@ export function registerMemoryWikiGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         const { agentId, appConfig, config } = resolveRequestContext(requestParams);
-        await syncImportedSourcesIfNeeded(config, appConfig);
         const lookup = readStringParam(requestParams, "lookup", { required: true });
         const fromLine = readPositiveIntegerParam(requestParams, "fromLine");
         const lineCount = readPositiveIntegerParam(requestParams, "lineCount");

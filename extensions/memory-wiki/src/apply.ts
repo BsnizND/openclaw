@@ -1,4 +1,5 @@
 // Memory Wiki plugin module implements apply behavior.
+import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   replaceManagedMarkdownBlock,
@@ -7,7 +8,8 @@ import {
 import { readFiniteNumberParam } from "openclaw/plugin-sdk/param-readers";
 import { FsSafeError, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
 import { normalizeStringEntries, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.js";
+import type { CompileMemoryWikiResult } from "./compile.js";
+import { invalidateMemoryWikiCompiledCache } from "./compiled-cache.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import {
   parseWikiMarkdown,
@@ -24,7 +26,7 @@ import {
   resolveQueryableWikiPageByLookup,
   type QueryableWikiPage,
 } from "./query.js";
-import { initializeMemoryWikiVault } from "./vault.js";
+import { ensureMemoryWikiVaultScaffold } from "./vault.js";
 
 const GENERATED_START = "<!-- openclaw:wiki:generated:start -->";
 const GENERATED_END = "<!-- openclaw:wiki:generated:end -->";
@@ -41,6 +43,7 @@ type CreateSynthesisMemoryWikiMutation = {
   questions?: string[];
   confidence?: number;
   status?: string;
+  replaceObservedContentHash?: string;
 };
 
 type UpdateMetadataMemoryWikiMutation = {
@@ -54,7 +57,9 @@ type UpdateMetadataMemoryWikiMutation = {
   status?: string;
 };
 
-type ApplyMemoryWikiMutation = CreateSynthesisMemoryWikiMutation | UpdateMetadataMemoryWikiMutation;
+export type ApplyMemoryWikiMutation =
+  | CreateSynthesisMemoryWikiMutation
+  | UpdateMetadataMemoryWikiMutation;
 
 type MemoryWikiMutationInputOp = ApplyMemoryWikiMutation["op"] | "synthesis" | "metadata";
 
@@ -63,7 +68,13 @@ type ApplyMemoryWikiMutationResult = {
   operation: ApplyMemoryWikiMutation["op"];
   pagePath: string;
   pageId?: string;
-  compile: CompileMemoryWikiResult;
+  compile?: CompileMemoryWikiResult;
+};
+
+export type ApplyMemoryWikiMutationsResult = {
+  changed: boolean;
+  results: Array<Omit<ApplyMemoryWikiMutationResult, "compile">>;
+  compile?: CompileMemoryWikiResult;
 };
 
 function normalizeMutationConfidence(
@@ -111,6 +122,7 @@ export function normalizeMemoryWikiMutationInput(rawParams: unknown): ApplyMemor
     questions?: string[];
     confidence?: number | null;
     status?: string;
+    replaceObservedContentHash?: string;
   };
   const op = normalizeMemoryWikiMutationOp(params.op);
   if (op === "create_synthesis") {
@@ -126,6 +138,10 @@ export function normalizeMemoryWikiMutationInput(rawParams: unknown): ApplyMemor
     const confidence = normalizeMutationConfidence(params as Record<string, unknown>, {
       allowNull: false,
     });
+    const replaceObservedContentHash = params.replaceObservedContentHash?.trim().toLowerCase();
+    if (replaceObservedContentHash && !/^[a-f0-9]{64}$/.test(replaceObservedContentHash)) {
+      throw new Error("wiki mutation replaceObservedContentHash requires an exact SHA-256 digest.");
+    }
     return {
       op: "create_synthesis",
       title: params.title,
@@ -136,6 +152,7 @@ export function normalizeMemoryWikiMutationInput(rawParams: unknown): ApplyMemor
       ...(params.questions ? { questions: params.questions } : {}),
       ...(typeof confidence === "number" ? { confidence } : {}),
       ...(params.status ? { status: params.status } : {}),
+      ...(replaceObservedContentHash ? { replaceObservedContentHash } : {}),
     };
   }
   if (!params.lookup?.trim()) {
@@ -216,18 +233,30 @@ async function writeWikiPage(params: {
   relativePath: string;
   frontmatter: Record<string, unknown>;
   body: string;
+  touchUpdatedAt?: boolean;
 }): Promise<boolean> {
   const root = await fsRoot(params.rootDir);
-  const rendered = withTrailingNewline(
+  const renderedWithoutTouch = withTrailingNewline(
     renderWikiMarkdown({
       frontmatter: params.frontmatter,
       body: params.body,
     }),
   );
   const existing = await readExistingWikiPage(root, params.relativePath);
-  if (existing === rendered) {
+  if (existing === renderedWithoutTouch) {
     return false;
   }
+  const rendered = params.touchUpdatedAt
+    ? withTrailingNewline(
+        renderWikiMarkdown({
+          frontmatter: {
+            ...params.frontmatter,
+            updatedAt: new Date().toISOString(),
+          },
+          body: params.body,
+        }),
+      )
+    : renderedWithoutTouch;
   await root.write(params.relativePath, rendered);
   return true;
 }
@@ -249,6 +278,12 @@ async function applyCreateSynthesisMutation(params: {
   const pagePath = path.join("syntheses", `${pageStem}.md`).replace(/\\/g, "/");
   const root = await fsRoot(params.config.vault.path);
   const existing = await readExistingWikiPage(root, pagePath);
+  if (params.mutation.replaceObservedContentHash) {
+    const observedContentHash = createHash("sha256").update(existing).digest("hex");
+    if (observedContentHash !== params.mutation.replaceObservedContentHash) {
+      throw new Error(`Wiki page changed before observed-body replacement: ${pagePath}`);
+    }
+  }
   const parsed = parseWikiMarkdown(existing);
   const pageId =
     (typeof parsed.frontmatter.id === "string" && parsed.frontmatter.id.trim()) ||
@@ -273,13 +308,13 @@ async function applyCreateSynthesisMutation(params: {
         ? { confidence: params.mutation.confidence }
         : {}),
       status: params.mutation.status?.trim() || "active",
-      updatedAt: new Date().toISOString(),
     },
     body: buildSynthesisBody({
       title: params.mutation.title,
-      originalBody: parsed.body,
+      originalBody: params.mutation.replaceObservedContentHash ? undefined : parsed.body,
       generatedBody: params.mutation.body.trim(),
     }),
+    touchUpdatedAt: true,
   });
   return { changed, pagePath, pageId };
 }
@@ -290,7 +325,6 @@ function buildUpdatedFrontmatter(params: {
 }): Record<string, unknown> {
   const frontmatter: Record<string, unknown> = {
     ...params.original,
-    updatedAt: new Date().toISOString(),
   };
   if (params.mutation.sourceIds) {
     frontmatter.sourceIds = normalizeSourceIds(params.mutation.sourceIds);
@@ -350,6 +384,7 @@ async function applyUpdateMetadataMutation(params: {
       mutation: params.mutation,
     }),
     body: parsed.body,
+    touchUpdatedAt: true,
   });
   return {
     changed,
@@ -362,7 +397,23 @@ async function applyMemoryWikiMutationUnlocked(params: {
   config: ResolvedMemoryWikiConfig;
   mutation: ApplyMemoryWikiMutation;
 }): Promise<ApplyMemoryWikiMutationResult> {
-  await initializeMemoryWikiVault(params.config);
+  await ensureMemoryWikiVaultScaffold(params.config);
+  const result = await applyMemoryWikiPageMutation(params);
+  if (result.changed) {
+    await invalidateMemoryWikiCompiledCache(params.config);
+  }
+  return {
+    changed: result.changed,
+    operation: params.mutation.op,
+    pagePath: result.pagePath,
+    ...(result.pageId ? { pageId: result.pageId } : {}),
+  };
+}
+
+async function applyMemoryWikiPageMutation(params: {
+  config: ResolvedMemoryWikiConfig;
+  mutation: ApplyMemoryWikiMutation;
+}): Promise<Omit<ApplyMemoryWikiMutationResult, "compile">> {
   const result =
     params.mutation.op === "create_synthesis"
       ? await applyCreateSynthesisMutation({
@@ -373,13 +424,11 @@ async function applyMemoryWikiMutationUnlocked(params: {
           config: params.config,
           mutation: params.mutation,
         });
-  const compile = await compileMemoryWikiVault(params.config);
   return {
     changed: result.changed,
     operation: params.mutation.op,
     pagePath: result.pagePath,
     ...(result.pageId ? { pageId: result.pageId } : {}),
-    compile,
   };
 }
 
@@ -390,4 +439,33 @@ export async function applyMemoryWikiMutation(params: {
   return await withMemoryWikiVaultMutation(params.config.vault.path, () =>
     applyMemoryWikiMutationUnlocked(params),
   );
+}
+
+export async function applyMemoryWikiMutations(params: {
+  config: ResolvedMemoryWikiConfig;
+  mutations: ApplyMemoryWikiMutation[];
+}): Promise<ApplyMemoryWikiMutationsResult> {
+  if (params.mutations.length === 0) {
+    throw new Error("wiki mutation batch requires at least one mutation.");
+  }
+  return await withMemoryWikiVaultMutation(params.config.vault.path, async () => {
+    await ensureMemoryWikiVaultScaffold(params.config);
+    const results: ApplyMemoryWikiMutationsResult["results"] = [];
+    for (const mutation of params.mutations) {
+      results.push(
+        await applyMemoryWikiPageMutation({
+          config: params.config,
+          mutation,
+        }),
+      );
+    }
+    const changed = results.some((result) => result.changed);
+    if (changed) {
+      await invalidateMemoryWikiCompiledCache(params.config);
+    }
+    return {
+      changed,
+      results,
+    };
+  });
 }
