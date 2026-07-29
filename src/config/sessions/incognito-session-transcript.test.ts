@@ -5,13 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resolveSession } from "../../agents/command/session.js";
 import { SessionManager } from "../../agents/sessions/session-manager.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
+import { formatSqliteSessionFileMarker } from "./legacy-sqlite-marker.js";
 import { resolveStorePath } from "./paths.js";
 import {
   createSessionEntryWithTranscript,
   loadSessionEntry,
   patchSessionEntryTarget,
 } from "./session-accessor.js";
-import { formatSqliteSessionFileMarker } from "./sqlite-marker.js";
 
 const sessionKey = "agent:main:dashboard:incognito-round-trip";
 
