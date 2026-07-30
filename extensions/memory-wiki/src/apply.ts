@@ -8,6 +8,7 @@ import { readFiniteNumberParam } from "openclaw/plugin-sdk/param-readers";
 import { FsSafeError, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
 import { normalizeStringEntries, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.js";
+import { invalidateMemoryWikiCompiledCache } from "./compiled-cache.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import {
   parseWikiMarkdown,
@@ -74,15 +75,6 @@ type ApplyMemoryWikiMutationParams = {
   dryRun?: boolean;
   initialize?: boolean;
   nowMs?: number;
-};
-
-type StandaloneApplyMemoryWikiMutationParams = ApplyMemoryWikiMutationParams & {
-  compile?: true;
-  dryRun?: false;
-};
-
-type StandaloneApplyMemoryWikiMutationResult = ApplyMemoryWikiMutationResult & {
-  compile: CompileMemoryWikiResult;
 };
 
 function normalizeMutationConfidence(
@@ -423,8 +415,12 @@ async function applyUpdateMetadataMutation(params: {
 async function applyMemoryWikiMutationUnlocked(
   params: ApplyMemoryWikiMutationParams,
 ): Promise<ApplyMemoryWikiMutationResult> {
+  let initialized = false;
   if (!params.dryRun && params.initialize !== false) {
-    await initializeMemoryWikiVault(params.config, { nowMs: params.nowMs });
+    const initialization = await initializeMemoryWikiVault(params.config, {
+      nowMs: params.nowMs,
+    });
+    initialized = initialization.created;
   }
   const result =
     params.mutation.op === "create_synthesis"
@@ -440,26 +436,28 @@ async function applyMemoryWikiMutationUnlocked(
           dryRun: params.dryRun,
           nowMs: params.nowMs,
         });
-  const compile =
-    !params.dryRun && params.compile !== false
-      ? await compileMemoryWikiVault(params.config)
-      : undefined;
+  const changed = initialized || result.changed;
+  let compile: CompileMemoryWikiResult | undefined;
+  if (changed && !params.dryRun) {
+    // A write must make the prior snapshot unreadable before any later fallible work.
+    // Batch callers then rebuild once; standalone callers rebuild immediately.
+    await invalidateMemoryWikiCompiledCache(params.config);
+    if (params.compile !== false) {
+      compile = await compileMemoryWikiVault(params.config);
+    }
+  }
   return {
-    changed: result.changed,
+    changed,
     operation: params.mutation.op,
     pagePath: result.pagePath,
     ...(result.pageId ? { pageId: result.pageId } : {}),
-    compile,
+    ...(compile ? { compile } : {}),
   };
 }
 
-export function applyMemoryWikiMutation(
-  params: StandaloneApplyMemoryWikiMutationParams,
-): Promise<StandaloneApplyMemoryWikiMutationResult>;
-export function applyMemoryWikiMutation(
+export async function applyMemoryWikiMutation(
   params: ApplyMemoryWikiMutationParams,
-): Promise<ApplyMemoryWikiMutationResult>;
-export async function applyMemoryWikiMutation(params: ApplyMemoryWikiMutationParams) {
+): Promise<ApplyMemoryWikiMutationResult> {
   return await withMemoryWikiVaultMutation(params.config.vault.path, () =>
     applyMemoryWikiMutationUnlocked(params),
   );

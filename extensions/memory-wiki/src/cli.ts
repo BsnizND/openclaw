@@ -18,7 +18,7 @@ import {
   type ChatGptImportResult,
   type ChatGptRollbackResult,
 } from "./chatgpt-import.js";
-import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.js";
+import { compileMemoryWikiVault } from "./compile.js";
 import {
   resolveMemoryWikiAgentConfig,
   WIKI_SEARCH_BACKENDS,
@@ -382,15 +382,16 @@ async function resolveWikiApplyBody(params: { body?: string; bodyFile?: string }
   throw new Error("wiki apply synthesis requires --body or --body-file.");
 }
 
-type MemoryWikiMutationResult = Awaited<ReturnType<typeof applyMemoryWikiMutation>> & {
-  compile: CompileMemoryWikiResult;
-};
+type MemoryWikiMutationResult = Awaited<ReturnType<typeof applyMemoryWikiMutation>>;
 
 function formatMemoryWikiMutationSummary(result: MemoryWikiMutationResult, json?: boolean): string {
   if (json) {
     return JSON.stringify(result, null, 2);
   }
-  return `${result.changed ? "Updated" : "No changes for"} ${result.pagePath} via ${result.operation}. ${result.compile.updatedFiles.length > 0 ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.` : "Indexes unchanged."}`;
+  if (!result.compile) {
+    return `No changes for ${result.pagePath} via ${result.operation}. Index compilation skipped.`;
+  }
+  return `Updated ${result.pagePath} via ${result.operation}. ${result.compile.updatedFiles.length > 0 ? `Refreshed ${result.compile.updatedFiles.length} index file${result.compile.updatedFiles.length === 1 ? "" : "s"}.` : "Indexes unchanged."}`;
 }
 
 function formatJsonOrText<T>(

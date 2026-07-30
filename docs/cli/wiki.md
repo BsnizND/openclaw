@@ -191,6 +191,8 @@ Apply narrow mutations without freeform page surgery:
 
 Both accept `--source-id`, `--contradiction`, `--question` (each repeatable), `--confidence <n>` (0-1), and `--status <status>`. `apply metadata` also accepts `--clear-confidence` to remove a stored confidence value. This is the supported way to evolve wiki pages so managed generated blocks stay intact.
 
+A semantic no-op preserves the page, audit log, and compiled snapshot and skips compilation. A changed mutation invalidates the previous compiled snapshot before rebuilding it, so a failed rebuild cannot leave old derived state looking current.
+
 ### `wiki apply-batch`
 
 Apply bounded machine-oriented source and synthesis operations from a version 1 JSON file:
@@ -200,7 +202,7 @@ openclaw wiki apply-batch --input ./wiki-apply-batch.json --dry-run --json
 openclaw wiki apply-batch --input ./wiki-apply-batch.json --json
 ```
 
-The input accepts at most 16 ordered operations. Supported operation kinds are `ingest-source` and `upsert-synthesis`; a synthesis can refer to an earlier source operation with `sourceRefs`. The command validates the complete input before mutation, preserves existing timestamps on semantic no-ops, and compiles at most once after all changed operations. `--dry-run` performs validation and change detection without writes.
+The input accepts at most 16 ordered operations. Supported operation kinds are `ingest-source` and `upsert-synthesis`; a synthesis can refer to an earlier source operation with `sourceRefs`. The command validates the complete input before mutation, applies operations under one vault lease, preserves existing timestamps on semantic no-ops, invalidates the prior compiled snapshot on the first write, and compiles at most once after all changed operations. `--dry-run` performs validation and change detection without writes.
 
 Inputs are capped at 256 KiB, referenced source files at 8 MiB, and synthesis bodies at 1 MiB. JSON output contains bounded operation results and compile counts; it does not include the full compiled page inventory.
 

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import { describe, expect, it, vi } from "vitest";
+import { loadMemoryWikiCompiledCache } from "./compiled-cache.js";
 import { ingestMemoryWikiSource, ingestMemoryWikiSourceBatchOperation } from "./ingest.js";
 import { withMemoryWikiVaultMutation } from "./mutation-coordinator.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
@@ -195,5 +196,25 @@ hello from source
     expect(page).toContain("sourceType: local-file");
     expect(page).not.toContain("evidenceType:");
     expect(page).not.toContain("evidenceOrigin:");
+  });
+
+  it("invalidates the compiled snapshot after a deferred batch ingest write", async () => {
+    const rootDir = await createTempDir("memory-wiki-ingest-deferred-");
+    const inputPath = path.join(rootDir, "source.txt");
+    await fs.writeFile(inputPath, "original source\n", "utf8");
+    const { config } = await createVault({ rootDir: path.join(rootDir, "vault") });
+    await ingestMemoryWikiSource({ config, inputPath, title: "Deferred Source" });
+    expect(await loadMemoryWikiCompiledCache(config)).not.toBeNull();
+
+    await fs.writeFile(inputPath, "updated source\n", "utf8");
+    const changed = await ingestMemoryWikiSourceBatchOperation({
+      config,
+      inputPath,
+      sourceBuffer: await fs.readFile(inputPath),
+      title: "Deferred Source",
+    });
+
+    expect(changed.changed).toBe(true);
+    await expect(loadMemoryWikiCompiledCache(config)).resolves.toBeNull();
   });
 });

@@ -1,11 +1,16 @@
 // Memory Wiki tests cover bounded batch behavior.
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runMemoryWikiApplyBatch, runMemoryWikiSearchBatch } from "./batch.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
 
 const { createTempDir, createVault } = createMemoryWikiTestHarness();
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await fs.writeFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
@@ -134,6 +139,46 @@ describe("memory-wiki batch operations", () => {
     expect(result.results).toHaveLength(3);
     expect(result.results.every((item) => item.ok)).toBe(true);
     expect(result.results.every((item) => item.candidatePageCount <= 2)).toBe(true);
+  });
+
+  it("keeps ordered operations and one compile under one vault lease", async () => {
+    const tempDir = await createTempDir("memory-wiki-batch-lease-");
+    const sourcePath = path.join(tempDir, "ordered.txt");
+    const applyPath = path.join(tempDir, "apply.json");
+    await fs.writeFile(sourcePath, "Ordered source evidence.\n", "utf8");
+    const { rootDir, config } = await createVault({
+      rootDir: path.join(tempDir, "vault"),
+      initialize: true,
+    });
+    await writeJson(applyPath, {
+      version: 1,
+      operations: [
+        {
+          id: "source-first",
+          kind: "ingest-source",
+          inputPath: sourcePath,
+          title: "Ordered Reference",
+        },
+        {
+          id: "synthesis-second",
+          kind: "upsert-synthesis",
+          title: "Ordered Synthesis",
+          body: "Built from the earlier source operation.",
+          sourceRefs: ["source-first"],
+        },
+      ],
+    });
+    const enqueue = vi.spyOn(KeyedAsyncQueue.prototype, "enqueue");
+
+    const result = await runMemoryWikiApplyBatch({ config, inputPath: applyPath });
+
+    expect(result.operations.map((operation) => operation.id)).toEqual([
+      "source-first",
+      "synthesis-second",
+    ]);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const log = await fs.readFile(path.join(rootDir, ".openclaw-wiki", "log.jsonl"), "utf8");
+    expect(log.match(/"pageCounts"/g)).toHaveLength(1);
   });
 
   it("rejects expected paths outside the wiki page directories", async () => {

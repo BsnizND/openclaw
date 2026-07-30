@@ -218,6 +218,21 @@ describe("memory-wiki cli", () => {
     await expect(fs.readFile(path.join(rootDir, "index.md"), "utf8")).resolves.toContain(
       "[CLI Alpha](syntheses/cli-alpha.md)",
     );
+
+    const repeated = await runRegisteredWikiCommand(config, [
+      "apply",
+      "synthesis",
+      "CLI Alpha",
+      "--body",
+      "Alpha from CLI.",
+      "--source-id",
+      "source.alpha",
+      "--source-id",
+      "source.beta",
+    ]);
+    expect(repeated).toContain(
+      "No changes for syntheses/cli-alpha.md via create_synthesis. Index compilation skipped.",
+    );
   });
 
   it("resolves --agent for local commands and requires it with multiple agent vaults", async () => {

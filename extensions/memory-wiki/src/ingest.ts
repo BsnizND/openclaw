@@ -4,6 +4,7 @@ import path from "node:path";
 import { replaceManagedMarkdownBlock } from "openclaw/plugin-sdk/memory-host-markdown";
 import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import { compileMemoryWikiVault } from "./compile.js";
+import { invalidateMemoryWikiCompiledCache } from "./compiled-cache.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
@@ -196,6 +197,8 @@ async function ingestMemoryWikiSourceUnlocked(params: {
 
   if (changed && !params.dryRun) {
     await fs.writeFile(pagePath, finalMarkdown, "utf8");
+    // If logging or compilation fails, readers must not keep using the pre-write snapshot.
+    await invalidateMemoryWikiCompiledCache(params.config);
     await appendMemoryWikiLog(params.config.vault.path, {
       type: "ingest",
       timestamp,
