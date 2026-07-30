@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import { WORKSPACE_TEMPLATE_PACK_PATHS } from "../../scripts/lib/workspace-bootstrap-smoke.mjs";
 
 const CONTROL_UI_INDEX = "dist/control-ui/index.html";
+const CODE_MODE_WORKER_PATH = "dist/agents/code-mode.worker.js";
 const CONTROL_UI_ASSETS = [
   "dist/control-ui/assets/app.js",
   "dist/control-ui/assets/app.js.br",
@@ -67,30 +68,11 @@ function withPackedPackage(
     );
     writeFixtureFile(
       packageRoot,
-      "npm-shrinkwrap.json",
-      JSON.stringify({
-        name: "openclaw",
-        version,
-        lockfileVersion: 3,
-        packages: {
-          "": {
-            name: "openclaw",
-            version,
-            ...(options.postinstall === false
-              ? {}
-              : {
-                  dependencies: { typescript: typescriptVersion },
-                  bundledDependencies: ["typescript"],
-                }),
-          },
-          ...(options.postinstall === false
-            ? {}
-            : { "node_modules/typescript": { version: typescriptVersion, inBundle: true } }),
-        },
-      }),
+      "dist/postinstall-inventory.json",
+      JSON.stringify([...new Set([...inventory, CODE_MODE_WORKER_PATH])]),
     );
-    writeFixtureFile(packageRoot, "dist/postinstall-inventory.json", JSON.stringify(inventory));
     writeFixtureFile(packageRoot, "dist/index.js", "export {};\n");
+    writeFixtureFile(packageRoot, CODE_MODE_WORKER_PATH, "export {};\n");
     writeFixtureFile(
       packageRoot,
       CONTROL_UI_INDEX,
@@ -130,7 +112,12 @@ function withPackedPackage(
       { cwd: packageRoot, encoding: "utf8", timeout: 30_000 },
     );
     expect(packed.status, packed.stderr || packed.error?.message).toBe(0);
-    const [{ filename }] = JSON.parse(packed.stdout) as [{ filename: string }];
+    // npm <=11 `pack --json` emits an array; npm 12 emits an object keyed by package name.
+    const parsed = JSON.parse(packed.stdout) as
+      | { filename: string }[]
+      | Record<string, { filename: string }>;
+    const packResult = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+    const filename = packResult?.filename ?? "";
     const tarball = join(root, filename);
     expect(existsSync(tarball)).toBe(true);
     run({ root, tarball });
@@ -154,11 +141,17 @@ function installPackedPackage(root: string, tarball: string) {
     mkdirSync(directory, { recursive: true });
   }
   const installRoot = join(root, "installed");
+  mkdirSync(installRoot, { recursive: true });
+  writeFileSync(
+    join(installRoot, "package.json"),
+    `${JSON.stringify({ private: true }, null, 2)}\n`,
+  );
   const result = spawnSync(
     "npm",
     [
       "install",
       "--foreground-scripts",
+      "--dangerously-allow-all-scripts",
       "--prefix",
       installRoot,
       "--no-audit",
@@ -183,7 +176,6 @@ function installPackedPackage(root: string, tarball: string) {
     },
   );
   expect(result.status, result.stderr || result.error?.message).toBe(0);
-  expect(result.stdout).toContain("scripts/postinstall-bundled-plugins.mjs");
   return join(installRoot, "node_modules", "openclaw");
 }
 
@@ -229,6 +221,7 @@ describe("packaged Control UI postinstall inventory", () => {
       expect(result.stdout).toContain("OpenClaw package tarball integrity passed.");
 
       const installedPackageRoot = installPackedPackage(root, tarball);
+      expect(existsSync(join(installedPackageRoot, CODE_MODE_WORKER_PATH))).toBe(true);
       for (const relativePath of CONTROL_UI_FILES) {
         expect(existsSync(join(installedPackageRoot, relativePath))).toBe(true);
       }

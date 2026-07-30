@@ -38,7 +38,6 @@ import {
 } from "../app-navigation.ts";
 import { isSupportedLocale } from "../i18n/index.ts";
 import { normalizeBoardSessionViews, type BoardSessionViews } from "../lib/board/settings.ts";
-import { normalizeSessionSectionOrderTokens } from "../lib/sessions/custom-groups.ts";
 import { normalizeOptionalString } from "../lib/string-coerce.ts";
 import { getSafeLocalStorage, getSafeSessionStorage } from "../local-storage.ts";
 import {
@@ -168,6 +167,19 @@ export function normalizeTextScale(value: unknown, fallback: TextScaleStop = 100
   return best;
 }
 
+export const UI_APPEARANCE_DEFAULTS = {
+  theme: "claw",
+  themeMode: "system",
+  textScale: 100,
+  sidebarLiveActivity: true,
+  chatMessageMaxWidth: "48rem",
+  chatSendShortcut: "enter",
+  catalogOpenTarget: "viewer",
+  composerHoldToRecord: true,
+  lobsterPetVisits: true,
+  lobsterPetSounds: false,
+} as const;
+
 export type UiSettings = {
   gatewayUrl: string;
   token: string;
@@ -188,13 +200,12 @@ export type UiSettings = {
   talkCameraAutoEnable?: boolean;
   chatSplitLayout?: ChatSplitLayout;
   chatWorkspaceDock?: ChatWorkspaceDock; // Session workspace rail dock edge (default "right")
-  boardSessionViews?: BoardSessionViews; // Last face and active dashboard tab per session
+  boardSessionViews?: BoardSessionViews; // Per-device active dashboard tab and dock state
   sidebarSessionLayouts?: SidebarSessionLayouts; // Sidebar columns and widths per session
   sidebarSessionActivePanels?: SidebarSessionActivePanels; // Collapsed active panel per session
   navCollapsed: boolean; // Collapsible sidebar state
   navWidth: number; // Sidebar width when expanded (240–400px)
   sidebarEntries: string[]; // Ordered routes, Workboard boards, and pinned sessions below Home
-  sessionSectionOrder: string[]; // Custom session groups interleaved with built-in session zones
   sidebarLiveActivity?: boolean; // Latest activity under running sidebar sessions (default true)
   chatMessageMaxWidth?: string; // Browser-local centered chat transcript max width
   showAdvancedSettings?: boolean; // Expand advanced schema settings (default false)
@@ -227,7 +238,10 @@ function isViteDevPage(): boolean {
 }
 
 function formatHostWithPort(hostname: string, port: string): string {
-  const normalizedHost = hostname.includes(":") ? `[${hostname}]` : hostname;
+  // location.hostname already carries brackets for IPv6 literals; wrapping
+  // again would produce an undialable ws://[[::1]]:port default.
+  const needsBrackets = hostname.includes(":") && !hostname.startsWith("[");
+  const normalizedHost = needsBrackets ? `[${hostname}]` : hostname;
   return `${normalizedHost}:${port}`;
 }
 
@@ -419,22 +433,20 @@ export function loadSettings(): UiSettings {
     token: loadSessionToken(defaultUrl),
     sessionKey: "main",
     lastActiveSessionKey: "main",
-    theme: "claw",
-    themeMode: "system",
+    theme: UI_APPEARANCE_DEFAULTS.theme,
+    themeMode: UI_APPEARANCE_DEFAULTS.themeMode,
     chatShowThinking: true,
     chatShowToolCalls: true,
     chatPersistCommentary: true,
-    chatSendShortcut: "enter",
-    catalogOpenTarget: "viewer",
+    chatSendShortcut: UI_APPEARANCE_DEFAULTS.chatSendShortcut,
+    catalogOpenTarget: UI_APPEARANCE_DEFAULTS.catalogOpenTarget,
     navCollapsed: false,
     navWidth: NAV_WIDTH_DEFAULT,
     sidebarEntries: [...DEFAULT_SIDEBAR_ENTRIES],
-    sessionSectionOrder: [],
-    sidebarLiveActivity: true,
+    sidebarLiveActivity: UI_APPEARANCE_DEFAULTS.sidebarLiveActivity,
     showAdvancedSettings: false,
     pinnedAgentIds: [],
-    textScale: 100,
-    composerHoldToRecord: true,
+    composerHoldToRecord: UI_APPEARANCE_DEFAULTS.composerHoldToRecord,
   };
 
   try {
@@ -527,9 +539,6 @@ export function loadSettings(): UiSettings {
         normalizeSidebarEntries(parsedRecord.sidebarEntries) ??
         migratedSidebarEntries ??
         defaults.sidebarEntries,
-      sessionSectionOrder:
-        normalizeSessionSectionOrderTokens(parsedRecord.sessionSectionOrder) ??
-        defaults.sessionSectionOrder,
       sidebarLiveActivity:
         typeof parsed.sidebarLiveActivity === "boolean"
           ? parsed.sidebarLiveActivity
@@ -540,7 +549,11 @@ export function loadSettings(): UiSettings {
           ? parsed.showAdvancedSettings
           : defaults.showAdvancedSettings,
       pinnedAgentIds: normalizePinnedAgentIds(parsed.pinnedAgentIds),
-      textScale: normalizeTextScale(parsed.textScale, defaults.textScale),
+      textScale:
+        typeof parsed.textScale === "number" &&
+        normalizeTextScale(parsed.textScale) !== UI_APPEARANCE_DEFAULTS.textScale
+          ? normalizeTextScale(parsed.textScale)
+          : undefined,
       customTheme: customTheme ?? undefined,
       locale: isSupportedLocale(parsed.locale) ? parsed.locale : undefined,
       ...(parsed.lobsterPetVisits === false ? { lobsterPetVisits: false } : {}),
@@ -670,7 +683,6 @@ function persistSettings(next: UiSettings, options: { selectGateway?: boolean } 
     navCollapsed: next.navCollapsed,
     navWidth: next.navWidth,
     sidebarEntries: next.sidebarEntries,
-    sessionSectionOrder: next.sessionSectionOrder,
     ...(next.sidebarLiveActivity === false ? { sidebarLiveActivity: false } : {}),
     ...(normalizeChatMessageMaxWidth(next.chatMessageMaxWidth)
       ? { chatMessageMaxWidth: normalizeChatMessageMaxWidth(next.chatMessageMaxWidth) }
@@ -680,7 +692,7 @@ function persistSettings(next: UiSettings, options: { selectGateway?: boolean } 
     ...(next.pinnedAgentIds && next.pinnedAgentIds.length > 0
       ? { pinnedAgentIds: next.pinnedAgentIds }
       : {}),
-    textScale: normalizeTextScale(next.textScale),
+    ...(next.textScale !== undefined ? { textScale: normalizeTextScale(next.textScale) } : {}),
     ...(next.customTheme ? { customTheme: next.customTheme } : {}),
     sessionsByGateway,
     ...(next.locale ? { locale: next.locale } : {}),

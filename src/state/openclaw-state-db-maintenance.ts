@@ -16,7 +16,7 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "./openclaw-state-db-contract.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
-import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.generated.js";
+import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 
 const OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY = {
   allowedMissingTables: LAZY_ADDITIVE_STATE_TABLES,
@@ -70,6 +70,7 @@ const STATE_V5_ADDITIVE_TABLES = [
   "worker_environment_credentials",
   "worker_transcript_commit_heads",
   "worker_transcript_commits",
+  ...LAZY_ADDITIVE_STATE_TABLES,
 ] as const;
 
 /** Open shared SQLite database handle plus WAL maintenance lifecycle. */

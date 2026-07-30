@@ -132,15 +132,18 @@ import {
   SessionsReclaimParamsSchema,
   SessionsMessagesSubscribeParamsSchema,
   SessionsMessagesUnsubscribeParamsSchema,
+  SessionsViewerPresenceSetParamsSchema,
   SessionsAbortParamsSchema,
   SessionsPatchParamsSchema,
   SessionsPluginPatchParamsSchema,
   SessionsResetParamsSchema,
   SessionsDeleteParamsSchema,
   SessionsGroupsListParamsSchema,
+  SessionsGroupsListResultSchema,
   SessionsGroupsPutParamsSchema,
   SessionsGroupsRenameParamsSchema,
   SessionsGroupsDeleteParamsSchema,
+  SessionsGroupsMutationResultSchema,
   SessionsCompactParamsSchema,
   SessionsCompactionListParamsSchema,
   SessionsCompactionGetParamsSchema,
@@ -235,6 +238,8 @@ import {
   SkillsProposalReviseParamsSchema,
   SkillsProposalRequestRevisionParamsSchema,
   SkillsProposalActionParamsSchema,
+  SkillsProposalEvaluateParamsSchema,
+  SkillsProposalEventsListParamsSchema,
   SkillsSecurityVerdictsParamsSchema,
   SkillsSkillCardParamsSchema,
   CronListParamsSchema,
@@ -298,7 +303,7 @@ import {
   UiCommandParamsSchema,
   WebLoginStartParamsSchema,
   WebLoginWaitParamsSchema,
-} from "./schema.js";
+} from "./schema-modules.js";
 import type { ValidationError } from "./validation-errors.js";
 
 // Validator names mirror schemas so callers can pair them with wire contracts.
@@ -498,15 +503,20 @@ export const validateSessionsMessagesSubscribeParams = lazyCompile(
 export const validateSessionsMessagesUnsubscribeParams = lazyCompile(
   SessionsMessagesUnsubscribeParamsSchema,
 );
+export const validateSessionsViewerPresenceSetParams = lazyCompile(
+  SessionsViewerPresenceSetParamsSchema,
+);
 export const validateSessionsAbortParams = lazyCompile(SessionsAbortParamsSchema);
 export const validateSessionsPatchParams = lazyCompile(SessionsPatchParamsSchema);
 export const validateSessionsPluginPatchParams = lazyCompile(SessionsPluginPatchParamsSchema);
 export const validateSessionsResetParams = lazyCompile(SessionsResetParamsSchema);
 export const validateSessionsDeleteParams = lazyCompile(SessionsDeleteParamsSchema);
 export const validateSessionsGroupsListParams = lazyCompile(SessionsGroupsListParamsSchema);
+export const validateSessionsGroupsListResult = lazyCompile(SessionsGroupsListResultSchema);
 export const validateSessionsGroupsPutParams = lazyCompile(SessionsGroupsPutParamsSchema);
 export const validateSessionsGroupsRenameParams = lazyCompile(SessionsGroupsRenameParamsSchema);
 export const validateSessionsGroupsDeleteParams = lazyCompile(SessionsGroupsDeleteParamsSchema);
+export const validateSessionsGroupsMutationResult = lazyCompile(SessionsGroupsMutationResultSchema);
 export const validateSessionsCompactParams = lazyCompile(SessionsCompactParamsSchema);
 export const validateSessionsCompactionListParams = lazyCompile(SessionsCompactionListParamsSchema);
 export const validateSessionsCompactionGetParams = lazyCompile(SessionsCompactionGetParamsSchema);
@@ -617,6 +627,10 @@ export const validateSkillsProposalRequestRevisionParams = lazyCompile(
   SkillsProposalRequestRevisionParamsSchema,
 );
 export const validateSkillsProposalActionParams = lazyCompile(SkillsProposalActionParamsSchema);
+export const validateSkillsProposalEvaluateParams = lazyCompile(SkillsProposalEvaluateParamsSchema);
+export const validateSkillsProposalEventsListParams = lazyCompile(
+  SkillsProposalEventsListParamsSchema,
+);
 export const validateSkillsSecurityVerdictsParams = lazyCompile(SkillsSecurityVerdictsParamsSchema);
 export const validateSkillsSkillCardParams = lazyCompile(SkillsSkillCardParamsSchema);
 export const validateCronListParams = lazyCompile(CronListParamsSchema);
