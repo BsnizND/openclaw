@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { applyMemoryWikiMutation } from "./apply.js";
 import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
@@ -61,10 +62,6 @@ type SearchBatchItem = WikiBatchSearchQuery & {
   expectedPageTypes: string[];
   required: boolean;
 };
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function requiredString(record: JsonRecord, key: string): string {
   const value = typeof record[key] === "string" ? record[key].trim() : "";
