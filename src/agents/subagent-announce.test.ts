@@ -700,6 +700,109 @@ describe("subagent announce seam flow", () => {
     logSpy.mockRestore();
   });
 
+  it("retains a delete-mode child until retryable completion delivery settles", async () => {
+    loadSessionStoreMock.mockReturnValue({
+      "agent:main:subagent:retry": {
+        sessionId: "child-session-id",
+        lifecycleRevision: "child-lifecycle-revision",
+      },
+    });
+    agentSpy
+      .mockResolvedValueOnce({ status: "error", error: "requester turn timed out" })
+      .mockResolvedValueOnce({ status: "ok" });
+
+    const params = {
+      childSessionKey: "agent:main:subagent:retry",
+      childRunId: "run-retry-delete-cleanup",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "deliver completion after retry",
+      timeoutMs: 10,
+      cleanup: "delete" as const,
+      waitForCompletion: false,
+      startedAt: 10,
+      endedAt: 20,
+      outcome: { status: "ok" as const },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+    };
+
+    await expect(runSubagentAnnounceFlow(params)).resolves.toBe(false);
+    expect(sessionsDeleteSpy).not.toHaveBeenCalled();
+
+    await expect(runSubagentAnnounceFlow(params)).resolves.toBe(true);
+    expect(sessionsDeleteSpy).toHaveBeenCalledTimes(1);
+    expect(sessionsDeleteSpy).toHaveBeenCalledWith({
+      method: "sessions.delete",
+      params: {
+        key: "agent:main:subagent:retry",
+        deleteTranscript: true,
+        emitLifecycleHooks: false,
+        expectedSessionId: "child-session-id",
+        expectedLifecycleRevision: "child-lifecycle-revision",
+      },
+      timeoutMs: 10_000,
+    });
+  });
+
+  it("still deletes after intentional completion non-delivery", async () => {
+    loadSessionStoreMock.mockReturnValue({
+      "agent:main:subagent:retired": {
+        sessionId: "retired-session-id",
+        lifecycleRevision: "retired-lifecycle-revision",
+      },
+    });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:retired",
+      childRunId: "run-intentional-non-delivery",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "retire superseded completion",
+      timeoutMs: 10,
+      cleanup: "delete",
+      waitForCompletion: false,
+      startedAt: 10,
+      endedAt: 20,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+      isCompletionDeliveryAllowed: () => false,
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(sessionsDeleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains a delete-mode child when the announce flow throws", async () => {
+    const errorSpy = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+    loadSessionStoreMock.mockImplementationOnce(() => {
+      throw new Error("session store unavailable");
+    });
+
+    await expect(
+      runSubagentAnnounceFlow({
+        childSessionKey: "agent:main:subagent:throw",
+        childRunId: "run-throw-delete-cleanup",
+        requesterSessionKey: "agent:main:main",
+        requesterDisplayKey: "main",
+        task: "retain completion after announce exception",
+        timeoutMs: 10,
+        cleanup: "delete",
+        waitForCompletion: false,
+        startedAt: 10,
+        endedAt: 20,
+        outcome: { status: "ok" },
+        roundOneReply: "done",
+        expectsCompletionMessage: true,
+      }),
+    ).resolves.toBe(false);
+
+    expect(sessionsDeleteSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
   it("does not treat ambiguous direct completion failures as announced", async () => {
     let deliveryResult:
       | {
