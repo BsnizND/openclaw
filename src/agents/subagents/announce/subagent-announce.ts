@@ -198,6 +198,7 @@ export async function runSubagentAnnounceFlow(params: {
   const expectsCompletionMessage = params.expectsCompletionMessage === true;
   const announceType = params.announceType ?? "subagent task";
   let shouldDeleteChildSession = params.cleanup === "delete";
+  let shouldRetainChildSessionForDelivery = false;
   const childSessionEffectsAllowed = () =>
     params.suppressChildSessionEffects !== true &&
     params.isChildSessionEffectsAllowed?.() !== false;
@@ -592,19 +593,25 @@ export async function runSubagentAnnounceFlow(params: {
     });
     reportDeliveryResult(delivery);
     announceOutcome = delivery.disposition ?? (delivery.delivered ? "delivered" : "retryable");
+    shouldRetainChildSessionForDelivery =
+      announceOutcome === "retryable" || announceOutcome === "ambiguous";
     if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
       defaultRuntime.log(
         `[warn] Subagent completion direct announce failed for run ${params.childRunId}: ${delivery.error}`,
       );
     }
   } catch (err) {
+    shouldRetainChildSessionForDelivery = true;
     defaultRuntime.error?.(`Subagent announce failed: ${String(err)}`);
     // Best-effort follow-ups; ignore failures to avoid breaking the caller response.
   } finally {
     // The spawn label is persisted at run start (agent request `label` →
     // buildAgentSessionPatch), so no post-run label patch is needed here.
+    // Retryable or ambiguous delivery still owns this session. Deleting it here
+    // makes restore prune the durable completion before redelivery can settle.
     if (
       shouldDeleteChildSession &&
+      !shouldRetainChildSessionForDelivery &&
       childSessionEffectsAllowed() &&
       (params.onBeforeDeleteChildSession?.() ?? true)
     ) {
