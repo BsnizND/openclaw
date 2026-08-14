@@ -715,9 +715,9 @@ export async function runSubagentAnnounceFlow(params: {
     reportDeliveryResult(delivery);
     didAnnounce = delivery.delivered || delivery.disposition === "intentional_non_delivery";
     // This release exposes delivery success to the lifecycle as a boolean.
-    // Any non-announced result must keep the child until that lifecycle either
+    // Any failed direct result must keep the child until that lifecycle either
     // retries successfully or owns the terminal give-up/suspension decision.
-    shouldRetainChildSessionForDelivery = !didAnnounce;
+    shouldRetainChildSessionForDelivery = !didAnnounce && delivery.disposition !== "session_queued";
     if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
       defaultRuntime.log(
         `[warn] Subagent completion direct announce failed for run ${params.childRunId}: ${delivery.error}`,
@@ -730,7 +730,7 @@ export async function runSubagentAnnounceFlow(params: {
   } finally {
     // The spawn label is persisted at run start (agent request `label` →
     // buildAgentSessionPatch), so no post-run label patch is needed here.
-    // A non-announced delivery still belongs to the lifecycle. Deleting the
+    // A failed direct delivery still belongs to the lifecycle. Deleting the
     // child here makes restore prune the completion before retry or suspension.
     if (
       shouldDeleteChildSession &&
