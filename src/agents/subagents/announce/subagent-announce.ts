@@ -198,6 +198,7 @@ export async function runSubagentAnnounceFlow(params: {
   const expectsCompletionMessage = params.expectsCompletionMessage === true;
   const announceType = params.announceType ?? "subagent task";
   let shouldDeleteChildSession = params.cleanup === "delete";
+  let shouldRetainChildSessionForDelivery = false;
   const childSessionEffectsAllowed = () =>
     params.suppressChildSessionEffects !== true &&
     params.isChildSessionEffectsAllowed?.() !== false;
@@ -592,12 +593,17 @@ export async function runSubagentAnnounceFlow(params: {
     });
     reportDeliveryResult(delivery);
     announceOutcome = delivery.disposition ?? (delivery.delivered ? "delivered" : "retryable");
+    // Queue-owned delivery no longer needs the child transcript, but a failed
+    // direct delivery does: the native lifecycle may retry or suspend it.
+    shouldRetainChildSessionForDelivery =
+      !delivery.delivered && delivery.disposition !== "session_queued";
     if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
       defaultRuntime.log(
         `[warn] Subagent completion direct announce failed for run ${params.childRunId}: ${delivery.error}`,
       );
     }
   } catch (err) {
+    shouldRetainChildSessionForDelivery = true;
     defaultRuntime.error?.(`Subagent announce failed: ${String(err)}`);
     // Best-effort follow-ups; ignore failures to avoid breaking the caller response.
   } finally {
@@ -605,6 +611,7 @@ export async function runSubagentAnnounceFlow(params: {
     // buildAgentSessionPatch), so no post-run label patch is needed here.
     if (
       shouldDeleteChildSession &&
+      !shouldRetainChildSessionForDelivery &&
       childSessionEffectsAllowed() &&
       (params.onBeforeDeleteChildSession?.() ?? true)
     ) {
