@@ -704,6 +704,36 @@ describe("subagent announce seam flow", () => {
     logSpy.mockRestore();
   });
 
+  it("retains a delete-cleanup child when direct completion delivery fails", async () => {
+    loadSessionStoreMock.mockReturnValue({
+      "agent:main:subagent:slack": {
+        sessionId: "child-session-id",
+        lifecycleRevision: "child-lifecycle-revision",
+      },
+    });
+    agentSpy.mockResolvedValueOnce({ status: "error", error: "Outbound not configured for slack" });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:slack",
+      childRunId: "run-direct-failure-retain",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "slack", to: "C123" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "delete",
+      waitForCompletion: false,
+      startedAt: 10,
+      endedAt: 20,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+    });
+
+    expect(didAnnounce).toBe("retryable");
+    expect(sessionsDeleteSpy).not.toHaveBeenCalled();
+  });
+
   it("does not treat ambiguous direct completion failures as announced", async () => {
     let deliveryResult:
       | {
