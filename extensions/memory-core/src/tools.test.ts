@@ -54,13 +54,13 @@ const sessionStore = vi.hoisted(() => ({
 
 const QMD_SEARCH_TIMEOUT_MS = 45_000;
 
-function createQmdTimeoutSearchTool(options?: { oneShotCliRun?: boolean }) {
+function createQmdTimeoutSearchTool(options?: { oneShotCliRun?: boolean; timeoutMs?: number }) {
   return createMemorySearchToolOrThrow({
     config: asOpenClawConfig({
       agents: { list: [{ id: "main", default: true }] },
       memory: {
         backend: "qmd",
-        qmd: { limits: { timeoutMs: QMD_SEARCH_TIMEOUT_MS } },
+        qmd: { limits: { timeoutMs: options?.timeoutMs ?? QMD_SEARCH_TIMEOUT_MS } },
       },
     }),
     ...(options?.oneShotCliRun ? { oneShotCliRun: true } : {}),
@@ -573,6 +573,63 @@ describe("memory_search unavailable payloads", () => {
       const result = await resultPromise;
       expect((result.details as { results?: unknown[] }).results).toHaveLength(1);
       expect(searchSignal?.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows qmd manager setup to complete inside its configured deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      setMemoryBackend("qmd");
+      setMemorySearchImpl(async () => [
+        {
+          path: "MEMORY.md",
+          startLine: 1,
+          endLine: 1,
+          score: 0.9,
+          snippet: "slow qmd manager result",
+          source: "memory",
+        },
+      ]);
+      const manager = createTestSearchManager({ backend: "qmd", search: async () => [] });
+      setMemorySearchManagerImpl(
+        async () =>
+          await new Promise((resolve) => {
+            setTimeout(() => resolve({ manager }), 25_000);
+          }),
+      );
+      const tool = createQmdTimeoutSearchTool({ timeoutMs: 30_000 });
+
+      const resultPromise = tool.execute("slow-qmd-manager", { query: "hello" });
+      await vi.advanceTimersByTimeAsync(25_000);
+
+      const result = await resultPromise;
+      expect((result.details as { results?: unknown[] }).results).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the configured qmd deadline fail-closed when manager setup exceeds it", async () => {
+    vi.useFakeTimers();
+    try {
+      setMemoryBackend("qmd");
+      const manager = createTestSearchManager({ backend: "qmd", search: async () => [] });
+      setMemorySearchManagerImpl(
+        async () =>
+          await new Promise((resolve) => {
+            setTimeout(() => resolve({ manager }), 25_000);
+          }),
+      );
+      const tool = createQmdTimeoutSearchTool({ timeoutMs: 20_000 });
+
+      const resultPromise = tool.execute("over-budget-qmd-manager", { query: "hello" });
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const result = await resultPromise;
+      expectMemorySearchTimeout(result.details, 20);
+      await vi.advanceTimersByTimeAsync(5_000);
     } finally {
       vi.useRealTimers();
     }

@@ -33,6 +33,7 @@ import {
   DEFAULT_MEMORY_SEARCH_TIMEOUT_MS,
   MEMORY_SEARCH_DEADLINE_CONTROL,
   resolveMemorySearchAbortError,
+  resolveMemorySearchTimeoutMs,
   runMemorySearchWithDeadline,
   type MemorySearchDeadlineAction,
   type MemorySearchDeadlineControlOptions,
@@ -532,7 +533,9 @@ export function createMemorySearchTool(options: {
           ) => Promise<T>,
         ): Promise<T> =>
           await runMemorySearchWithDeadline({
-            timeoutMs: DEFAULT_MEMORY_SEARCH_TIMEOUT_MS,
+            timeoutMs: resolveMemorySearchTimeoutMs(
+              cfg.memory?.backend === "qmd" ? cfg.memory.qmd?.limits?.timeoutMs : undefined,
+            ),
             parentSignal: callerSignal,
             run: task,
           });

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runMemorySearchWithDeadline, type MemorySearchDeadlineAction } from "./search-deadline.js";
+import {
+  DEFAULT_MEMORY_SEARCH_TIMEOUT_MS,
+  resolveMemorySearchTimeoutMs,
+  runMemorySearchWithDeadline,
+  type MemorySearchDeadlineAction,
+} from "./search-deadline.js";
 
 describe("runMemorySearchWithDeadline", () => {
   afterEach(() => {
@@ -117,5 +122,17 @@ describe("runMemorySearchWithDeadline", () => {
     await resultAssertion;
     expect(taskSignal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("resolveMemorySearchTimeoutMs", () => {
+  it("uses the configured QMD budget when it exceeds the safe default", () => {
+    expect(resolveMemorySearchTimeoutMs(25_000)).toBe(25_000);
+  });
+
+  it("keeps the safe default for missing or shorter budgets", () => {
+    expect(resolveMemorySearchTimeoutMs()).toBe(DEFAULT_MEMORY_SEARCH_TIMEOUT_MS);
+    expect(resolveMemorySearchTimeoutMs(4_000)).toBe(DEFAULT_MEMORY_SEARCH_TIMEOUT_MS);
+    expect(resolveMemorySearchTimeoutMs(Number.NaN)).toBe(DEFAULT_MEMORY_SEARCH_TIMEOUT_MS);
   });
 });

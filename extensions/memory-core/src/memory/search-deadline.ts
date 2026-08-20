@@ -1,4 +1,18 @@
 export const DEFAULT_MEMORY_SEARCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Keep the tool deadline at least as long as the configured QMD command
+ * budget. QMD manager setup and maintenance can legitimately precede the
+ * query subprocess, so the command timeout is the smallest existing native
+ * budget that can admit that work.
+ */
+export function resolveMemorySearchTimeoutMs(configuredTimeoutMs?: number): number {
+  return typeof configuredTimeoutMs === "number" &&
+    Number.isFinite(configuredTimeoutMs) &&
+    configuredTimeoutMs > 0
+    ? Math.max(DEFAULT_MEMORY_SEARCH_TIMEOUT_MS, configuredTimeoutMs)
+    : DEFAULT_MEMORY_SEARCH_TIMEOUT_MS;
+}
 // QMD pauses only for its query subprocess; fallback hands ownership to its
 // own fresh default deadline. Manager maintenance remains on this clock.
 export const MEMORY_SEARCH_DEADLINE_CONTROL = Symbol("memory-search-deadline-control");
