@@ -106,7 +106,11 @@ const WikiApplySchema = Type.Object(
 async function syncImportedSourcesIfNeeded(
   config: ResolvedMemoryWikiConfig,
   appConfig?: OpenClawConfig,
+  options: { readOnly?: boolean } = {},
 ) {
+  if (options.readOnly === true && config.vaultMode === "isolated") {
+    return;
+  }
   await syncMemoryWikiImportedSources({ config, appConfig });
 }
 
@@ -161,7 +165,7 @@ export function createWikiSearchTool(
         corpus?: ResolvedMemoryWikiConfig["search"]["corpus"];
         mode?: (typeof WIKI_SEARCH_MODES)[number];
       };
-      await syncImportedSourcesIfNeeded(config, appConfig);
+      await syncImportedSourcesIfNeeded(config, appConfig, { readOnly: true });
       const results = await searchMemoryWiki({
         config,
         appConfig,
@@ -292,7 +296,7 @@ export function createWikiGetTool(
           details: { found: false },
         };
       }
-      await syncImportedSourcesIfNeeded(config, appConfig);
+      await syncImportedSourcesIfNeeded(config, appConfig, { readOnly: true });
       const result = await getMemoryWikiPage({
         config,
         appConfig,

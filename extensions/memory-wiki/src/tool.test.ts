@@ -4,8 +4,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import { lintMemoryWikiVault } from "./lint.js";
+import { withMemoryWikiVaultMutation } from "./mutation-coordinator.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
-import { createWikiApplyTool, createWikiLintTool } from "./tool.js";
+import { createWikiApplyTool, createWikiGetTool, createWikiLintTool } from "./tool.js";
 
 function asSchemaObject(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -111,5 +112,51 @@ describe("memory-wiki tools", () => {
     const lintResult = await lintMemoryWikiVault(config);
     expect(path.isAbsolute(lintResult.reportPath)).toBe(true);
     expect(lintResult.reportPath).toContain(rootDir);
+  });
+
+  it("reads an exact isolated wiki page without waiting for the mutation owner", async () => {
+    const { rootDir, config } = await harness.createVault({ initialize: true });
+    const pagePath = path.join(rootDir, "syntheses", "alpha.md");
+    await fs.mkdir(path.dirname(pagePath), { recursive: true });
+    await fs.writeFile(
+      pagePath,
+      [
+        "---",
+        "id: synthesis.alpha",
+        "pageType: synthesis",
+        "title: Alpha",
+        "---",
+        "",
+        "Exact useful content.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    let releaseMutation!: () => void;
+    let mutationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      mutationStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const holder = withMemoryWikiVaultMutation(config.vault.path, async () => {
+      mutationStarted();
+      await release;
+    });
+    await started;
+
+    try {
+      const result = await Promise.race([
+        createWikiGetTool(config).execute("get-isolated", { lookup: "syntheses/alpha.md" }),
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("isolated wiki_get waited for mutation owner")), 1_000);
+        }),
+      ]);
+      expect(result.details).toEqual(expect.objectContaining({ found: true }));
+    } finally {
+      releaseMutation();
+      await holder;
+    }
   });
 });
