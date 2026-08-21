@@ -6,7 +6,7 @@ import { registerMemoryWikiGatewayMethods } from "./gateway.js";
 import { listMemoryWikiImportInsights } from "./import-insights.js";
 import { listMemoryWikiImportRuns } from "./import-runs.js";
 import { ingestMemoryWikiSource } from "./ingest.js";
-import { searchMemoryWiki } from "./query.js";
+import { getMemoryWikiPage, searchMemoryWiki } from "./query.js";
 import { syncMemoryWikiImportedSources } from "./source-sync.js";
 import { resolveMemoryWikiStatus } from "./status.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
@@ -311,6 +311,53 @@ describe("memory-wiki gateway methods", () => {
       agentId: null,
       vaultMode: "isolated",
       vaultExists: true,
+    });
+  });
+
+  it("keeps isolated search and get reads outside imported-source mutation sync", async () => {
+    const { config } = await createVault({ prefix: "memory-wiki-gateway-isolated-read-" });
+    const { api, registerGatewayMethod } = createPluginApi();
+    vi.mocked(searchMemoryWiki).mockResolvedValue([] as never);
+    vi.mocked(getMemoryWikiPage).mockResolvedValue(null);
+
+    registerMemoryWikiGatewayMethods({ api, config });
+    const search = findGatewayHandler(registerGatewayMethod, "wiki.search");
+    const get = findGatewayHandler(registerGatewayMethod, "wiki.get");
+    if (!search || !get) throw new Error("wiki read handlers missing");
+
+    await search({ params: { query: "alpha" }, respond: vi.fn() });
+    await get({ params: { lookup: "syntheses/alpha.md" }, respond: vi.fn() });
+
+    expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
+    expect(searchMemoryWiki).toHaveBeenCalledOnce();
+    expect(getMemoryWikiPage).toHaveBeenCalledOnce();
+  });
+
+  it("still synchronizes imported sources before bridge search and get reads", async () => {
+    const { config } = await createVault({
+      prefix: "memory-wiki-gateway-bridge-read-",
+      config: { vaultMode: "bridge" },
+    });
+    const { api, registerGatewayMethod } = createPluginApi();
+    vi.mocked(searchMemoryWiki).mockResolvedValue([] as never);
+    vi.mocked(getMemoryWikiPage).mockResolvedValue(null);
+
+    registerMemoryWikiGatewayMethods({ api, config });
+    const search = findGatewayHandler(registerGatewayMethod, "wiki.search");
+    const get = findGatewayHandler(registerGatewayMethod, "wiki.get");
+    if (!search || !get) throw new Error("wiki read handlers missing");
+
+    await search({ params: { query: "alpha" }, respond: vi.fn() });
+    await get({ params: { lookup: "syntheses/alpha.md" }, respond: vi.fn() });
+
+    expect(syncMemoryWikiImportedSources).toHaveBeenCalledTimes(2);
+    expect(syncMemoryWikiImportedSources).toHaveBeenNthCalledWith(1, {
+      config,
+      appConfig: undefined,
+    });
+    expect(syncMemoryWikiImportedSources).toHaveBeenNthCalledWith(2, {
+      config,
+      appConfig: undefined,
     });
   });
 

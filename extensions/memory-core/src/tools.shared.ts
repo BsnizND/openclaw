@@ -128,20 +128,25 @@ export function buildMemorySearchUnavailableResult(
   const isMissingNodeSqlite = /missing node:sqlite|no such built-?in module: node:sqlite/.test(
     normalizedReason,
   );
+  const isSearchDeadline = /memory_search timed out after \d+s/.test(normalizedReason);
   const warning =
     overrides?.warning ??
     (isQuotaError
       ? "Memory search is unavailable because the embedding provider quota is exhausted."
       : isMissingNodeSqlite
         ? "Memory search is unavailable because this OpenClaw Node runtime does not provide SQLite support."
-        : "Memory search is unavailable due to an embedding/provider error.");
+        : isSearchDeadline
+          ? "Memory search exceeded its local search deadline."
+          : "Memory search is unavailable due to an embedding/provider error.");
   const action =
     overrides?.action ??
     (isQuotaError
       ? "Top up or switch embedding provider, then retry memory_search."
       : isMissingNodeSqlite
         ? "Run OpenClaw with a Node runtime that includes node:sqlite, then retry memory_search."
-        : "Check embedding provider configuration and retry memory_search.");
+        : isSearchDeadline
+          ? "Inspect memory status; do not repeat the same search in this turn."
+          : "Check embedding provider configuration and retry memory_search.");
   return {
     results: [],
     disabled: true,

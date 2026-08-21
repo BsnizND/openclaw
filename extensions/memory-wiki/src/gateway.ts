@@ -81,7 +81,11 @@ function respondError(respond: GatewayRespond, error: unknown) {
 async function syncImportedSourcesIfNeeded(
   config: ResolvedMemoryWikiConfig,
   appConfig?: OpenClawConfig,
+  options: { readOnly?: boolean } = {},
 ) {
+  if (options.readOnly === true && config.vaultMode === "isolated") {
+    return;
+  }
   await syncMemoryWikiImportedSources({ config, appConfig });
 }
 
@@ -318,7 +322,7 @@ export function registerMemoryWikiGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         const { agentId, appConfig, config } = resolveRequestContext(requestParams);
-        await syncImportedSourcesIfNeeded(config, appConfig);
+        await syncImportedSourcesIfNeeded(config, appConfig, { readOnly: true });
         const query = readStringParam(requestParams, "query", { required: true });
         const maxResults = readPositiveIntegerParam(requestParams, "maxResults");
         const searchBackend = readEnumParam(requestParams, "backend", WIKI_SEARCH_BACKENDS);
@@ -369,7 +373,7 @@ export function registerMemoryWikiGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         const { agentId, appConfig, config } = resolveRequestContext(requestParams);
-        await syncImportedSourcesIfNeeded(config, appConfig);
+        await syncImportedSourcesIfNeeded(config, appConfig, { readOnly: true });
         const lookup = readStringParam(requestParams, "lookup", { required: true });
         const fromLine = readPositiveIntegerParam(requestParams, "fromLine");
         const lineCount = readPositiveIntegerParam(requestParams, "lineCount");
