@@ -1588,6 +1588,63 @@ describe("getMemoryWikiPage", () => {
     expect(result?.truncated).toBe(true);
   });
 
+  it("reads an exact relative path without scanning unrelated wiki pages", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    const renderPage = (id: string) =>
+      renderWikiMarkdown({
+        frontmatter: { pageType: "source", id: `source.${id}`, title: id },
+        body: `# ${id}\n\n${id} body\n`,
+      });
+    await Promise.all([
+      fs.writeFile(path.join(rootDir, "sources", "target.md"), renderPage("target"), "utf8"),
+      fs.writeFile(
+        path.join(rootDir, "sources", "sibling-one.md"),
+        renderPage("sibling-one"),
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(rootDir, "sources", "sibling-two.md"),
+        renderPage("sibling-two"),
+        "utf8",
+      ),
+    ]);
+    const readFile = vi.spyOn(fs, "readFile");
+
+    try {
+      const result = await getMemoryWikiPage({ config, lookup: "sources/target.md" });
+
+      expect(result?.path).toBe("sources/target.md");
+      const openedPaths = readFile.mock.calls.map(([file]) => String(file));
+      expect(openedPaths.some((file) => file.endsWith("/sources/target.md"))).toBe(true);
+      expect(openedPaths.some((file) => file.endsWith("/sources/sibling-one.md"))).toBe(false);
+      expect(openedPaths.some((file) => file.endsWith("/sources/sibling-two.md"))).toBe(false);
+    } finally {
+      readFile.mockRestore();
+    }
+  });
+
+  it("rejects an exact relative path whose symlink escapes the vault", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    const outsidePath = path.join(path.dirname(rootDir), `outside-${path.basename(rootDir)}.md`);
+    await fs.writeFile(
+      outsidePath,
+      renderWikiMarkdown({
+        frontmatter: { pageType: "source", id: "source.outside", title: "Outside" },
+        body: "# Outside\n",
+      }),
+      "utf8",
+    );
+    await fs.symlink(outsidePath, path.join(rootDir, "sources", "escape.md"));
+
+    await expect(getMemoryWikiPage({ config, lookup: "sources/escape.md" })).rejects.toThrow(
+      "wiki page resolved outside the vault root",
+    );
+  });
+
   it("defaults non-finite wiki line options before slicing", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,

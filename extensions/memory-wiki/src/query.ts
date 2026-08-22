@@ -242,6 +242,58 @@ async function readQueryableWikiPagesByPaths(
   );
 }
 
+function isPathInsideOrEqual(parentPath: string, candidatePath: string): boolean {
+  const relative = path.relative(parentPath, candidatePath);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+}
+
+function buildDirectWikiLookupCandidates(lookup: string): string[] {
+  return buildLookupCandidates(lookup).filter((candidate) => {
+    const normalized = candidate.split(path.sep).join("/");
+    if (path.posix.isAbsolute(normalized) || path.posix.normalize(normalized) !== normalized) {
+      return false;
+    }
+    const [directory, ...rest] = normalized.split("/");
+    return (
+      QUERY_DIRS.includes(directory as (typeof QUERY_DIRS)[number]) &&
+      rest.length > 0 &&
+      normalized.endsWith(".md") &&
+      path.posix.basename(normalized) !== "index.md"
+    );
+  });
+}
+
+async function readDirectQueryableWikiPage(
+  rootDir: string,
+  lookup: string,
+): Promise<QueryableWikiPage | null> {
+  const canonicalRoot = await fs.realpath(rootDir);
+  for (const relativePath of buildDirectWikiLookupCandidates(lookup)) {
+    const absolutePath = path.resolve(rootDir, relativePath);
+    if (!isPathInsideOrEqual(path.resolve(rootDir), absolutePath)) {
+      continue;
+    }
+    let canonicalPath: string;
+    try {
+      canonicalPath = await fs.realpath(absolutePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+    if (!isPathInsideOrEqual(canonicalRoot, canonicalPath)) {
+      throw new Error("wiki page resolved outside the vault root");
+    }
+    const raw = await fs.readFile(canonicalPath, "utf8");
+    const summary = toWikiPageSummary({ absolutePath, relativePath, raw });
+    if (summary) {
+      return { ...summary, raw };
+    }
+  }
+  return null;
+}
+
 async function readQueryDigestBundle(
   config: ResolvedMemoryWikiConfig,
 ): Promise<QueryDigestBundle | null> {
@@ -1378,10 +1430,19 @@ export async function getMemoryWikiPage(input: {
           await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
         ).find(canReadPage) ?? null)
       : null;
-    const pages = digestLookupPage
-      ? [digestLookupPage]
-      : (await readQueryableWikiPages(effectiveConfig.vault.path)).filter(canReadPage);
-    const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
+    const directLookupPage = digestLookupPage
+      ? null
+      : await readDirectQueryableWikiPage(effectiveConfig.vault.path, params.lookup);
+    const visibleDirectLookupPage =
+      directLookupPage && canReadPage(directLookupPage) ? directLookupPage : null;
+    const pages =
+      digestLookupPage || visibleDirectLookupPage
+        ? []
+        : (await readQueryableWikiPages(effectiveConfig.vault.path)).filter(canReadPage);
+    const page =
+      digestLookupPage ??
+      visibleDirectLookupPage ??
+      resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);
       const lines = parsed.body.split(/\r?\n/);
