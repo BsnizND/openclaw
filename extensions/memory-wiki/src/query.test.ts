@@ -1666,6 +1666,7 @@ describe("getMemoryWikiPage", () => {
       ).toBe(true);
       expect(openedPaths.some((file) => file.endsWith("/syntheses/sibling-one.md"))).toBe(false);
       expect(openedPaths.some((file) => file.endsWith("/syntheses/sibling-two.md"))).toBe(false);
+      expect(openedPaths.some((file) => file.includes("agent-digest"))).toBe(false);
     } finally {
       readFile.mockRestore();
     }

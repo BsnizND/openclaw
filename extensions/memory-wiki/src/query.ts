@@ -1449,18 +1449,19 @@ export async function getMemoryWikiPage(input: {
 
   if (shouldSearchWiki(effectiveConfig)) {
     const canReadPage = createWikiPageVisibilityFilter(params);
-    const digest = await readQueryDigestBundle(effectiveConfig);
+    const directLookupPage = await readDirectQueryableWikiPage(
+      effectiveConfig.vault.path,
+      params.lookup,
+    );
+    const visibleDirectLookupPage =
+      directLookupPage && canReadPage(directLookupPage) ? directLookupPage : null;
+    const digest = visibleDirectLookupPage ? null : await readQueryDigestBundle(effectiveConfig);
     const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
     const digestLookupPage = digestClaimPagePath
       ? ((
           await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
         ).find(canReadPage) ?? null)
       : null;
-    const directLookupPage = digestLookupPage
-      ? null
-      : await readDirectQueryableWikiPage(effectiveConfig.vault.path, params.lookup);
-    const visibleDirectLookupPage =
-      directLookupPage && canReadPage(directLookupPage) ? directLookupPage : null;
     const pages =
       digestLookupPage || visibleDirectLookupPage
         ? []
