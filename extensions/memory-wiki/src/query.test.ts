@@ -1625,6 +1625,52 @@ describe("getMemoryWikiPage", () => {
     }
   });
 
+  it("reads an exact canonical node id without scanning unrelated wiki pages", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    const renderPage = (id: string) =>
+      renderWikiMarkdown({
+        frontmatter: { pageType: "synthesis", id: `synthesis.${id}`, title: id },
+        body: `# ${id}\n\n${id} body\n`,
+      });
+    await Promise.all([
+      fs.writeFile(
+        path.join(rootDir, "syntheses", "preference-memory-active-catalog.md"),
+        renderPage("preference-memory-active-catalog"),
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(rootDir, "syntheses", "sibling-one.md"),
+        renderPage("sibling-one"),
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(rootDir, "syntheses", "sibling-two.md"),
+        renderPage("sibling-two"),
+        "utf8",
+      ),
+    ]);
+    const readFile = vi.spyOn(fs, "readFile");
+
+    try {
+      const result = await getMemoryWikiPage({
+        config,
+        lookup: "synthesis.preference-memory-active-catalog",
+      });
+
+      expect(result?.path).toBe("syntheses/preference-memory-active-catalog.md");
+      const openedPaths = readFile.mock.calls.map(([file]) => String(file));
+      expect(
+        openedPaths.some((file) => file.endsWith("/syntheses/preference-memory-active-catalog.md")),
+      ).toBe(true);
+      expect(openedPaths.some((file) => file.endsWith("/syntheses/sibling-one.md"))).toBe(false);
+      expect(openedPaths.some((file) => file.endsWith("/syntheses/sibling-two.md"))).toBe(false);
+    } finally {
+      readFile.mockRestore();
+    }
+  });
+
   it("rejects an exact relative path whose symlink escapes the vault", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,

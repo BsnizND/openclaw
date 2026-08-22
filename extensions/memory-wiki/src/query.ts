@@ -29,6 +29,13 @@ import {
 import { initializeMemoryWikiVault } from "./vault.js";
 
 const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
+const DIRECT_NODE_ID_DIRS: Readonly<Record<string, (typeof QUERY_DIRS)[number]>> = {
+  entity: "entities",
+  concept: "concepts",
+  source: "sources",
+  synthesis: "syntheses",
+  report: "reports",
+};
 const QUERY_PAGE_READ_CONCURRENCY = 16;
 const RELATED_BLOCK_PATTERN =
   /<!-- openclaw:wiki:related:start -->[\s\S]*?<!-- openclaw:wiki:related:end -->/g;
@@ -248,7 +255,26 @@ function isPathInsideOrEqual(parentPath: string, candidatePath: string): boolean
 }
 
 function buildDirectWikiLookupCandidates(lookup: string): string[] {
-  return buildLookupCandidates(lookup).filter((candidate) => {
+  const trimmed = lookup.trim();
+  const nodeIdSeparator = trimmed.indexOf(".");
+  const nodeIdPrefix = nodeIdSeparator > 0 ? trimmed.slice(0, nodeIdSeparator) : "";
+  const nodeIdSuffix = nodeIdSeparator > 0 ? trimmed.slice(nodeIdSeparator + 1) : "";
+  const nodeIdDirectory = DIRECT_NODE_ID_DIRS[nodeIdPrefix];
+  const nodeIdCandidate =
+    nodeIdDirectory &&
+    nodeIdSuffix.length > 0 &&
+    nodeIdSuffix !== "." &&
+    nodeIdSuffix !== ".." &&
+    !nodeIdSuffix.includes("/") &&
+    !nodeIdSuffix.includes("\\") &&
+    !nodeIdSuffix.includes("\0")
+      ? `${nodeIdDirectory}/${nodeIdSuffix}.md`
+      : null;
+
+  return uniqueStrings([
+    ...buildLookupCandidates(lookup),
+    ...(nodeIdCandidate ? [nodeIdCandidate] : []),
+  ]).filter((candidate) => {
     const normalized = candidate.split(path.sep).join("/");
     if (path.posix.isAbsolute(normalized) || path.posix.normalize(normalized) !== normalized) {
       return false;
