@@ -1652,6 +1652,7 @@ describe("getMemoryWikiPage", () => {
       ),
     ]);
     const readFile = vi.spyOn(fs, "readFile");
+    const mkdir = vi.spyOn(fs, "mkdir");
 
     try {
       const result = await getMemoryWikiPage({
@@ -1667,7 +1668,9 @@ describe("getMemoryWikiPage", () => {
       expect(openedPaths.some((file) => file.endsWith("/syntheses/sibling-one.md"))).toBe(false);
       expect(openedPaths.some((file) => file.endsWith("/syntheses/sibling-two.md"))).toBe(false);
       expect(openedPaths.some((file) => file.includes("agent-digest"))).toBe(false);
+      expect(mkdir).not.toHaveBeenCalled();
     } finally {
+      mkdir.mockRestore();
       readFile.mockRestore();
     }
   });

@@ -293,7 +293,15 @@ async function readDirectQueryableWikiPage(
   rootDir: string,
   lookup: string,
 ): Promise<QueryableWikiPage | null> {
-  const canonicalRoot = await fs.realpath(rootDir);
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await fs.realpath(rootDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
   for (const relativePath of buildDirectWikiLookupCandidates(lookup)) {
     const absolutePath = path.resolve(rootDir, relativePath);
     if (!isPathInsideOrEqual(path.resolve(rootDir), absolutePath)) {
@@ -318,6 +326,31 @@ async function readDirectQueryableWikiPage(
     }
   }
   return null;
+}
+
+function toWikiGetResult(
+  page: QueryableWikiPage,
+  fromLine: number,
+  lineCount: number,
+): WikiGetResult {
+  const parsed = parseWikiMarkdown(page.raw);
+  const lines = parsed.body.split(/\r?\n/);
+  const totalLines = lines.length;
+  const slice = lines.slice(fromLine - 1, fromLine - 1 + lineCount).join("\n");
+  const truncated = fromLine - 1 + lineCount < totalLines;
+
+  return {
+    corpus: "wiki",
+    path: page.relativePath,
+    title: page.title,
+    kind: page.kind,
+    content: slice,
+    fromLine,
+    lineCount,
+    totalLines,
+    truncated,
+    ...buildWikiResultMetadata(page),
+  };
 }
 
 async function readQueryDigestBundle(
@@ -1443,7 +1476,6 @@ export async function getMemoryWikiPage(input: {
     sandboxed: params.sandboxed,
     operation: "wiki_get",
   });
-  await initializeMemoryWikiVault(effectiveConfig);
   const fromLine = normalizePositiveInteger(params.fromLine, 1);
   const lineCount = normalizePositiveInteger(params.lineCount, 200);
 
@@ -1455,40 +1487,28 @@ export async function getMemoryWikiPage(input: {
     );
     const visibleDirectLookupPage =
       directLookupPage && canReadPage(directLookupPage) ? directLookupPage : null;
-    const digest = visibleDirectLookupPage ? null : await readQueryDigestBundle(effectiveConfig);
+    if (visibleDirectLookupPage) {
+      return toWikiGetResult(visibleDirectLookupPage, fromLine, lineCount);
+    }
+  }
+
+  await initializeMemoryWikiVault(effectiveConfig);
+
+  if (shouldSearchWiki(effectiveConfig)) {
+    const canReadPage = createWikiPageVisibilityFilter(params);
+    const digest = await readQueryDigestBundle(effectiveConfig);
     const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
     const digestLookupPage = digestClaimPagePath
       ? ((
           await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
         ).find(canReadPage) ?? null)
       : null;
-    const pages =
-      digestLookupPage || visibleDirectLookupPage
-        ? []
-        : (await readQueryableWikiPages(effectiveConfig.vault.path)).filter(canReadPage);
-    const page =
-      digestLookupPage ??
-      visibleDirectLookupPage ??
-      resolveQueryableWikiPageByLookup(pages, params.lookup);
+    const pages = digestLookupPage
+      ? []
+      : (await readQueryableWikiPages(effectiveConfig.vault.path)).filter(canReadPage);
+    const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
-      const parsed = parseWikiMarkdown(page.raw);
-      const lines = parsed.body.split(/\r?\n/);
-      const totalLines = lines.length;
-      const slice = lines.slice(fromLine - 1, fromLine - 1 + lineCount).join("\n");
-      const truncated = fromLine - 1 + lineCount < totalLines;
-
-      return {
-        corpus: "wiki",
-        path: page.relativePath,
-        title: page.title,
-        kind: page.kind,
-        content: slice,
-        fromLine,
-        lineCount,
-        totalLines,
-        truncated,
-        ...buildWikiResultMetadata(page),
-      };
+      return toWikiGetResult(page, fromLine, lineCount);
     }
   }
 
