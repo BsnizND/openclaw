@@ -197,10 +197,10 @@ export default definePluginEntry({
       },
     });
 
-    // Preflight and recall own separate deadlines. Reserve enough hook time for
-    // both maxima so preflight latency cannot consume recall settlement time.
+    // Preflight, optional trigger lookup, and recall own separate deadlines.
+    // Reserve their maxima without consuming recall settlement time.
     const beforePromptBuildTimeoutMs =
-      MAX_TIMEOUT_MS + MAX_SETUP_GRACE_TIMEOUT_MS + HOOK_TIMEOUT_RECOVERY_GRACE_MS * 2;
+      MAX_TIMEOUT_MS + MAX_SETUP_GRACE_TIMEOUT_MS + HOOK_TIMEOUT_RECOVERY_GRACE_MS * 3;
     api.on(
       "before_prompt_build",
       async (event, ctx) => {
@@ -264,6 +264,7 @@ export default definePluginEntry({
             );
           });
         };
+        const preflightDeadlineAt = Date.now() + HOOK_TIMEOUT_RECOVERY_GRACE_MS;
         armHookDeadline(HOOK_TIMEOUT_RECOVERY_GRACE_MS, "preflight");
         const handlerPromise = (async () => {
           try {
@@ -360,6 +361,10 @@ export default definePluginEntry({
               chatIdAllowed
             ) {
               toolAuthority.assertActive();
+              // Trigger lookup is optional and owns its own bounded deadline.
+              // Pause preflight so its timeout can fall through to model recall.
+              const remainingPreflightMs = Math.max(0, preflightDeadlineAt - Date.now());
+              hookDeadline.stop();
               laneOne = await resolveTriggerRecall({
                 cfg: liveConfig,
                 agentId: effectiveAgentId,
@@ -375,6 +380,7 @@ export default definePluginEntry({
                 );
                 return { hasStrongHit: false, injectedCount: 0 };
               });
+              armHookDeadline(remainingPreflightMs, "preflight");
               toolAuthority.assertActive();
               if (laneOne.context && laneOne.injectedCount > 0 && invocationConfig.logging) {
                 api.logger.info?.(
