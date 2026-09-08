@@ -767,8 +767,8 @@ describe("active-memory plugin", () => {
     const [hookName, handler, options] = firstHookRegistration();
     expect(hookName).toBe("before_prompt_build");
     expect(typeof handler).toBe("function");
-    expect(options).toEqual({ timeoutMs: 153_000, requiresToolAuthority: true });
-    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(153_000);
+    expect(options).toEqual({ timeoutMs: 154_500, requiresToolAuthority: true });
+    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(154_500);
     expect(hooks.before_model_resolve).toBeUndefined();
     expect(typeof hooks.agent_end).toBe("function");
   });
@@ -834,13 +834,13 @@ describe("active-memory plugin", () => {
   it("keeps the outer hook timeout at the live-config ceiling", () => {
     registerPluginConfig({ timeoutMs: 90_000 });
 
-    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(153_000);
+    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(154_500);
   });
 
   it("covers the maximum recall and setup-grace budgets", () => {
     registerPluginConfig({ timeoutMs: 90_000, setupGraceTimeoutMs: 30_000 });
 
-    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(153_000);
+    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(154_500);
   });
 
   it("runs recall without recording shared auth-profile failures", async () => {
@@ -2073,6 +2073,41 @@ describe("active-memory plugin", () => {
     );
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
   });
+
+  it.each([0, 1_490])(
+    "continues model recall after %d ms preflight when trigger lookup times out",
+    async (preflightMs) => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new Error("trigger lookup timeout")), delay);
+        return controller.signal;
+      });
+      vi.spyOn(api.runtime.state, "openKeyedStore").mockReturnValue({
+        lookup: async () =>
+          await new Promise<undefined>((resolve) => {
+            setTimeout(() => resolve(undefined), preflightMs);
+          }),
+      });
+      hoisted.getActiveMemorySearchManager.mockImplementationOnce(
+        () => new Promise<never>(() => {}),
+      );
+
+      const result = runPromptBuild(
+        { prompt: "what did we decide?" },
+        {
+          sessionKey: "agent:main:telegram:direct:owner",
+          messageProvider: "telegram",
+          channelId: "owner",
+        },
+      );
+      await vi.advanceTimersByTimeAsync(preflightMs + 1_500);
+
+      expectPrependContextResult(await result);
+      expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
+      expect(hasWarnLine("preflight timed out")).toBe(false);
+    },
+  );
 
   it("frames the blocking memory subagent as a memory search agent for another model", async () => {
     await runPromptBuild({
