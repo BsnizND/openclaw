@@ -1,6 +1,6 @@
 // Manages compile-cache respawn behavior for the CLI entrypoint.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { enableCompileCache, getCompileCacheDir } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +20,7 @@ import {
 // enabled on Windows npm-global installs. Keep the skip scoped to that platform.
 const MIN_COMPILE_CACHE_NODE_24_MINOR = 15;
 const COMPILE_CACHE_DISABLED_RESPAWNED_ENV = "OPENCLAW_COMPILE_CACHE_DISABLED_RESPAWNED";
+const DEFAULT_STALE_COMPILE_CACHE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export function resolveEntryInstallRoot(entryFile: string): string {
   const entryDir = path.dirname(entryFile);
@@ -123,6 +124,47 @@ function resolveOpenClawCompileCacheDirectory(params: {
     version,
     sanitizeCompileCachePathSegment(installMarker),
   );
+}
+
+function pruneStaleOpenClawCompileCacheVersions(params: {
+  currentDirectory: string;
+  graceMs?: number;
+  nowMs?: number;
+}): string[] {
+  const currentVersionRoot = path.dirname(params.currentDirectory);
+  const openClawCacheRoot = path.dirname(currentVersionRoot);
+  if (path.basename(openClawCacheRoot) !== "openclaw") {
+    return [];
+  }
+  const nowMs = params.nowMs ?? Date.now();
+  const graceMs = params.graceMs ?? DEFAULT_STALE_COMPILE_CACHE_GRACE_MS;
+  const removed: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(openClawCacheRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const candidate = path.join(openClawCacheRoot, entry.name);
+    if (path.resolve(candidate) === path.resolve(currentVersionRoot)) {
+      continue;
+    }
+    try {
+      const stat = statSync(candidate);
+      if (nowMs - stat.mtimeMs < Math.max(0, graceMs)) {
+        continue;
+      }
+      rmSync(candidate, { recursive: true, force: true });
+      removed.push(candidate);
+    } catch {
+      // Best-effort generated cache cleanup must never block startup.
+    }
+  }
+  return removed;
 }
 
 type OpenClawCompileCacheRespawnPlan = {
@@ -229,7 +271,9 @@ export function enableOpenClawCompileCache(params: {
     return;
   }
   try {
-    enableCompileCache(resolveOpenClawCompileCacheDirectory(params));
+    const cacheDirectory = resolveOpenClawCompileCacheDirectory(params);
+    pruneStaleOpenClawCompileCacheVersions({ currentDirectory: cacheDirectory });
+    enableCompileCache(cacheDirectory);
   } catch {
     // Best-effort only; never block startup.
   }
@@ -240,6 +284,7 @@ if (process.env.VITEST || process.env.NODE_ENV === "test") {
     buildOpenClawCompileCacheRespawnPlan,
     isNodeVersionAffectedByCompileCacheDeadlock,
     isSourceCheckoutInstallRoot,
+    pruneStaleOpenClawCompileCacheVersions,
     resolveOpenClawCompileCacheDirectory,
     runOpenClawCompileCacheRespawnPlan,
     shouldEnableOpenClawCompileCache,

@@ -72,4 +72,47 @@ describe("managed npm retention", () => {
       fs.rmSync(stateDir, { recursive: true, force: true });
     }
   });
+
+  it("cleans only stale incomplete managed generation projects", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-retention-"));
+    const npmDir = path.join(stateDir, "npm");
+    const staleProjectRoot = resolvePluginNpmGenerationProjectDir({
+      npmDir,
+      packageName: "@openclaw/acpx",
+      generationKey: "stale-incomplete",
+    });
+    const activeProjectRoot = resolvePluginNpmGenerationProjectDir({
+      npmDir,
+      packageName: "@openclaw/acpx",
+      generationKey: "active-incomplete",
+    });
+    const recentProjectRoot = resolvePluginNpmGenerationProjectDir({
+      npmDir,
+      packageName: "@openclaw/acpx",
+      generationKey: "recent-incomplete",
+    });
+    const activePackageDir = path.join(activeProjectRoot, "node_modules", "@openclaw", "acpx");
+    fs.mkdirSync(path.join(staleProjectRoot, "node_modules"), { recursive: true });
+    fs.mkdirSync(activePackageDir, { recursive: true });
+    fs.mkdirSync(path.join(recentProjectRoot, "node_modules"), { recursive: true });
+    const nowMs = Date.now();
+    const staleDate = new Date(nowMs - 48 * 60 * 60 * 1000);
+    fs.utimesSync(staleProjectRoot, staleDate, staleDate);
+    fs.utimesSync(activeProjectRoot, staleDate, staleDate);
+
+    try {
+      await expect(
+        cleanupRetainedManagedNpmInstallGenerations({
+          npmDir,
+          activeInstallPaths: [activePackageDir],
+          nowMs,
+        }),
+      ).resolves.toBe(1);
+      expect(fs.existsSync(staleProjectRoot)).toBe(false);
+      expect(fs.existsSync(activeProjectRoot)).toBe(true);
+      expect(fs.existsSync(recentProjectRoot)).toBe(true);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
 });

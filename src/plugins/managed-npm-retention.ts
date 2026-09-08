@@ -6,6 +6,8 @@ import { resolveDefaultPluginNpmDir, resolvePluginNpmProjectsDir } from "./insta
 import { listManagedPluginNpmRootsSync } from "./npm-project-roots.js";
 
 const RETAINED_MANAGED_NPM_INSTALL_MARKER_DIR = ".openclaw-retained-npm-installs";
+const MANAGED_NPM_GENERATION_PROJECT_RE = /__openclaw-generation__g-[0-9a-f]{16}$/;
+const DEFAULT_INCOMPLETE_GENERATION_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export function resolveRetainedManagedNpmInstallPackageInfo(packageDir: string): {
   packageName: string;
@@ -116,6 +118,29 @@ function isPathEqualOrInside(parentPath: string, childPath: string): boolean {
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`));
 }
 
+function isStaleIncompleteManagedNpmGeneration(params: {
+  nowMs: number;
+  orphanGraceMs: number;
+  projectRoot: string;
+}): boolean {
+  if (!MANAGED_NPM_GENERATION_PROJECT_RE.test(path.basename(params.projectRoot))) {
+    return false;
+  }
+  if (
+    fs.existsSync(path.join(params.projectRoot, "package.json")) ||
+    fs.existsSync(path.join(params.projectRoot, "package-lock.json")) ||
+    fs.existsSync(path.join(params.projectRoot, RETAINED_MANAGED_NPM_INSTALL_MARKER_DIR))
+  ) {
+    return false;
+  }
+  try {
+    const stat = fs.statSync(params.projectRoot);
+    return stat.isDirectory() && params.nowMs - stat.mtimeMs >= Math.max(0, params.orphanGraceMs);
+  } catch {
+    return false;
+  }
+}
+
 function listManagedNpmPackageDirs(npmRoot: string): string[] {
   const nodeModulesDir = path.join(npmRoot, "node_modules");
   let entries: fs.Dirent[];
@@ -169,8 +194,10 @@ export async function cleanupRetainedManagedNpmInstallGenerations(
   params: {
     activeInstallPaths?: Iterable<string>;
     env?: NodeJS.ProcessEnv;
+    nowMs?: number;
     npmDir?: string;
     onError?: (error: unknown, projectRoot: string) => void;
+    orphanGraceMs?: number;
   } = {},
 ): Promise<number> {
   // Callers run this only after the previous gateway server has closed and preserve
@@ -180,6 +207,8 @@ export async function cleanupRetainedManagedNpmInstallGenerations(
   const activeInstallPaths = Array.from(params.activeInstallPaths ?? [], (installPath) =>
     path.resolve(installPath),
   );
+  const nowMs = params.nowMs ?? Date.now();
+  const orphanGraceMs = params.orphanGraceMs ?? DEFAULT_INCOMPLETE_GENERATION_GRACE_MS;
   let removed = 0;
   for (const projectRoot of listManagedPluginNpmRootsSync(npmDir)) {
     if (path.resolve(projectRoot) === path.resolve(npmDir)) {
@@ -188,6 +217,23 @@ export async function cleanupRetainedManagedNpmInstallGenerations(
         activeInstallPaths,
         onError: params.onError,
       });
+      continue;
+    }
+    if (
+      isPathEqualOrInside(projectsDir, projectRoot) &&
+      !activeInstallPaths.some((installPath) => isPathEqualOrInside(projectRoot, installPath)) &&
+      isStaleIncompleteManagedNpmGeneration({
+        nowMs,
+        orphanGraceMs,
+        projectRoot,
+      })
+    ) {
+      try {
+        await fs.promises.rm(projectRoot, { recursive: true, force: true });
+        removed += 1;
+      } catch (error) {
+        params.onError?.(error, projectRoot);
+      }
       continue;
     }
     const markerDir = path.join(projectRoot, RETAINED_MANAGED_NPM_INSTALL_MARKER_DIR);

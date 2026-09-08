@@ -10,6 +10,7 @@ import {
   buildOpenClawCompileCacheRespawnPlan,
   isNodeVersionAffectedByCompileCacheDeadlock,
   isSourceCheckoutInstallRoot,
+  pruneStaleOpenClawCompileCacheVersions,
   resolveOpenClawCompileCacheDirectory,
   runOpenClawCompileCacheRespawnPlan,
   shouldEnableOpenClawCompileCache,
@@ -86,6 +87,30 @@ describe("entry compile cache", () => {
     expect(directory).toContain(path.join(".node-cache", "openclaw"));
     expect(directory).toContain("2026.4.29");
     expect(path.basename(directory)).toMatch(/^\d+-\d+$/);
+  });
+
+  it("prunes stale prior-version caches while retaining current and recent roots", async () => {
+    const root = tempDirs.make("openclaw-compile-cache-retention-");
+    const openClawRoot = path.join(root, "openclaw");
+    const currentDirectory = path.join(openClawRoot, "2026.7.2-beta.4", "current-install");
+    const staleRoot = path.join(openClawRoot, "2026.7.1-2");
+    const recentRoot = path.join(openClawRoot, "2026.7.1-beta.5");
+    await fs.mkdir(currentDirectory, { recursive: true });
+    await fs.mkdir(staleRoot, { recursive: true });
+    await fs.mkdir(recentRoot, { recursive: true });
+    const nowMs = Date.now();
+    const staleDate = new Date(nowMs - 48 * 60 * 60 * 1000);
+    await fs.utimes(staleRoot, staleDate, staleDate);
+
+    expect(
+      pruneStaleOpenClawCompileCacheVersions({
+        currentDirectory,
+        nowMs,
+      }),
+    ).toEqual([staleRoot]);
+    await expect(fs.stat(path.dirname(currentDirectory))).resolves.toBeDefined();
+    await expect(fs.stat(recentRoot)).resolves.toBeDefined();
+    await expect(fs.stat(staleRoot)).rejects.toThrow();
   });
 
   it("builds a one-shot no-cache respawn plan when source checkout inherits NODE_COMPILE_CACHE", async () => {

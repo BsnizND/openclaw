@@ -30,6 +30,11 @@ type CompileCacheTestApi = {
   }): CompileCacheRespawnPlan | undefined;
   isNodeVersionAffectedByCompileCacheDeadlock(nodeVersion: string | undefined): boolean;
   isSourceCheckoutInstallRoot(installRoot: string): boolean;
+  pruneStaleOpenClawCompileCacheVersions(params: {
+    currentDirectory: string;
+    graceMs?: number;
+    nowMs?: number;
+  }): string[];
   resolveOpenClawCompileCacheDirectory(params: {
     env?: NodeJS.ProcessEnv;
     installRoot: string;
@@ -61,6 +66,12 @@ export function isNodeVersionAffectedByCompileCacheDeadlock(
 
 export function isSourceCheckoutInstallRoot(installRoot: string): boolean {
   return getTestApi().isSourceCheckoutInstallRoot(installRoot);
+}
+
+export function pruneStaleOpenClawCompileCacheVersions(
+  params: Parameters<CompileCacheTestApi["pruneStaleOpenClawCompileCacheVersions"]>[0],
+): string[] {
+  return getTestApi().pruneStaleOpenClawCompileCacheVersions(params);
 }
 
 export function resolveOpenClawCompileCacheDirectory(
