@@ -264,7 +264,7 @@ export default definePluginEntry({
             );
           });
         };
-        const preflightDeadlineAt = Date.now() + HOOK_TIMEOUT_RECOVERY_GRACE_MS;
+        const preflightDeadlineAt = performance.now() + HOOK_TIMEOUT_RECOVERY_GRACE_MS;
         armHookDeadline(HOOK_TIMEOUT_RECOVERY_GRACE_MS, "preflight");
         const handlerPromise = (async () => {
           try {
@@ -363,7 +363,10 @@ export default definePluginEntry({
               toolAuthority.assertActive();
               // Optional lookup owns the remaining preflight allowance. Its
               // deadline must end lookup without aborting eligible model recall.
-              const remainingPreflightMs = Math.max(0, preflightDeadlineAt - Date.now());
+              const remainingPreflightMs = Math.max(
+                0,
+                Math.ceil(preflightDeadlineAt - performance.now()),
+              );
               hookDeadline.stop();
               laneOne = await resolveTriggerRecall({
                 cfg: liveConfig,
@@ -380,7 +383,10 @@ export default definePluginEntry({
                 );
                 return { hasStrongHit: false, injectedCount: 0 };
               });
-              armHookDeadline(Math.max(0, preflightDeadlineAt - Date.now()), "preflight");
+              armHookDeadline(
+                Math.max(0, Math.ceil(preflightDeadlineAt - performance.now())),
+                "preflight",
+              );
               toolAuthority.assertActive();
               if (laneOne.context && laneOne.injectedCount > 0 && invocationConfig.logging) {
                 api.logger.info?.(
