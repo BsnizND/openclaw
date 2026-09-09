@@ -197,10 +197,10 @@ export default definePluginEntry({
       },
     });
 
-    // Preflight, optional trigger lookup, and recall own separate deadlines.
-    // Reserve their maxima without consuming recall settlement time.
+    // Preflight and recall own separate deadlines. Reserve enough hook time for
+    // both maxima so preflight latency cannot consume recall settlement time.
     const beforePromptBuildTimeoutMs =
-      MAX_TIMEOUT_MS + MAX_SETUP_GRACE_TIMEOUT_MS + HOOK_TIMEOUT_RECOVERY_GRACE_MS * 3;
+      MAX_TIMEOUT_MS + MAX_SETUP_GRACE_TIMEOUT_MS + HOOK_TIMEOUT_RECOVERY_GRACE_MS * 2;
     api.on(
       "before_prompt_build",
       async (event, ctx) => {
@@ -361,8 +361,8 @@ export default definePluginEntry({
               chatIdAllowed
             ) {
               toolAuthority.assertActive();
-              // Trigger lookup is optional and owns its own bounded deadline.
-              // Pause preflight so its timeout can fall through to model recall.
+              // Optional lookup owns the remaining preflight allowance. Its
+              // deadline must end lookup without aborting eligible model recall.
               const remainingPreflightMs = Math.max(0, preflightDeadlineAt - Date.now());
               hookDeadline.stop();
               laneOne = await resolveTriggerRecall({
@@ -371,7 +371,7 @@ export default definePluginEntry({
                 query: searchQuery,
                 message: event.prompt,
                 activeProjectKeys: ctx.activeProjectKeys,
-                signal: AbortSignal.timeout(HOOK_TIMEOUT_RECOVERY_GRACE_MS),
+                signal: AbortSignal.timeout(remainingPreflightMs),
                 runId: ctx.runId,
                 authorityFingerprint: toolAuthority.fingerprint,
               }).catch((error: unknown) => {
@@ -380,7 +380,7 @@ export default definePluginEntry({
                 );
                 return { hasStrongHit: false, injectedCount: 0 };
               });
-              armHookDeadline(remainingPreflightMs, "preflight");
+              armHookDeadline(Math.max(0, preflightDeadlineAt - Date.now()), "preflight");
               toolAuthority.assertActive();
               if (laneOne.context && laneOne.injectedCount > 0 && invocationConfig.logging) {
                 api.logger.info?.(
