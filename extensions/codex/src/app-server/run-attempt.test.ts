@@ -3842,6 +3842,8 @@ describe("runCodexAppServerAttempt", () => {
   it("keeps thread-start developer instructions stable when adding fresh-thread continuity", async () => {
     let hookCalls = 0;
     type HookInputForTest = {
+      prompt: string;
+      originalPrompt: string;
       messages?: Array<{ content?: Array<{ text?: string; type?: string }>; role?: string }>;
     };
     const beforePromptBuild = vi.fn(async (event: unknown) => {
@@ -3863,7 +3865,9 @@ describe("runCodexAppServerAttempt", () => {
     sessionManager.appendMessage(userMessage("prior visible context", Date.now()));
     sessionManager.appendMessage(assistantMessage("prior assistant context", Date.now() + 1));
     const harness = createStartedThreadHarness();
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    const params = createParams(sessionFile, workspaceDir);
+    params.prompt = "continue the migration";
+    const run = runCodexAppServerAttempt(params);
     await harness.waitForMethod("turn/start");
     await new Promise<void>((resolve) => {
       setImmediate(resolve);
@@ -3871,9 +3875,13 @@ describe("runCodexAppServerAttempt", () => {
     await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
     await run;
     expect(beforePromptBuild).toHaveBeenCalledTimes(2);
-    const [, secondHookInput] = beforePromptBuild.mock.calls.map(
+    const [firstHookInput, secondHookInput] = beforePromptBuild.mock.calls.map(
       ([event]) => event as HookInputForTest,
     );
+    expect(firstHookInput?.originalPrompt).toBe(params.prompt);
+    expect(secondHookInput?.originalPrompt).toBe(params.prompt);
+    expect(firstHookInput?.prompt).not.toBe(secondHookInput?.prompt);
+    expect(secondHookInput?.prompt).toContain("prior visible context");
     const secondHookMessageTexts =
       secondHookInput?.messages?.flatMap(
         (message) => message.content?.map((part) => part.text ?? "") ?? [],

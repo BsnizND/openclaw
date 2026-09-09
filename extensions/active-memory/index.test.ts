@@ -1103,8 +1103,15 @@ describe("active-memory plugin", () => {
     };
     seedSession(context.sessionKey, "s-private-recall", 0);
 
-    await runPromptBuild({ prompt: "what wings should i order?" }, context);
-    await runPromptBuild({ prompt: "what wings should i order?" }, context);
+    const originalPrompt = "what wings should i order?";
+    await runPromptBuild({ prompt: originalPrompt, originalPrompt }, context);
+    await runPromptBuild(
+      {
+        prompt: `Prior conversation: dinner plans. Current request: ${originalPrompt}`,
+        originalPrompt,
+      },
+      context,
+    );
 
     expect(lastEmbeddedRunParams().conversationRecall).toEqual({
       anchorSessionKey: context.sessionKey,
@@ -1113,9 +1120,27 @@ describe("active-memory plugin", () => {
     });
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
 
+    await runPromptBuild(
+      { prompt: "rebuilt prompt", originalPrompt: "what did I order last time?" },
+      context,
+    );
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    await runPromptBuild(
+      { prompt: originalPrompt, originalPrompt },
+      {
+        ...context,
+        toolAuthority: {
+          fingerprint: "replacement-memory-authority",
+          allows: () => true,
+          assertActive: () => undefined,
+        },
+      },
+    );
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(3);
+
     await requireHook("agent_end")({ runId: context.runId, messages: [], success: true }, context);
     await runPromptBuild({ prompt: "what wings should i order?" }, context);
-    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(4);
   });
 
   it("retries transient SQLite recall cleanup failures", async () => {

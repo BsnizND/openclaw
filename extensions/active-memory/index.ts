@@ -276,6 +276,7 @@ export default definePluginEntry({
           });
         };
         armHookDeadline(HOOK_TIMEOUT_RECOVERY_GRACE_MS, "preflight");
+        const recallPrompt = event.originalPrompt ?? event.prompt;
         const handlerPromise = (async () => {
           try {
             const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
@@ -345,7 +346,7 @@ export default definePluginEntry({
             };
             const recentTurns = extractRecentTurns(event.messages);
             const searchQuery = buildSearchQuery({
-              latestUserMessage: event.prompt,
+              latestUserMessage: recallPrompt,
               recentTurns,
             });
             const memorySlot = normalizePluginsConfig(liveConfig.plugins).slots.memory;
@@ -379,7 +380,7 @@ export default definePluginEntry({
                 cfg: liveConfig,
                 agentId: effectiveAgentId,
                 query: searchQuery,
-                message: event.prompt,
+                message: recallPrompt,
                 activeProjectKeys: ctx.activeProjectKeys,
                 signal: AbortSignal.timeout(HOOK_TIMEOUT_RECOVERY_GRACE_MS),
                 runId: ctx.runId,
@@ -439,7 +440,7 @@ export default definePluginEntry({
             }
             const escalationDecision = resolveRecallEscalationDecision({
               mode: invocationConfig.mode,
-              message: event.prompt,
+              message: recallPrompt,
               hasStrongLaneOneHit: laneOne.hasStrongHit,
             });
             if (escalationDecision !== "recall") {
@@ -467,7 +468,7 @@ export default definePluginEntry({
                 ? { ...invocationConfig, toolsAllow: [productRecallToolName] }
                 : { ...invocationConfig, toolsAllow: allowedRecallTools };
             const query = buildQuery({
-              latestUserMessage: event.prompt,
+              latestUserMessage: recallPrompt,
               recentTurns,
               config: recallConfig,
             });

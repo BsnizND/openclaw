@@ -20,7 +20,10 @@ export type PluginHookBeforeModelResolveResult = {
 
 // before_prompt_build hook
 export type PluginHookBeforePromptBuildEvent = {
+  /** Model-facing prompt, which may include projected session history. */
   prompt: string;
+  /** Current request before history projection, including current inbound context when present. */
+  originalPrompt?: string;
   /** Session messages prepared for this run. */
   messages: unknown[];
 };

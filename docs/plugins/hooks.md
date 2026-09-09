@@ -756,7 +756,12 @@ Use the phase-specific hooks for new plugins:
 - `agent_turn_prepare`: receives the current prompt, prepared session
   messages, and queued injections consumed for this session.
   Return `prependContext` or `appendContext`.
-- `before_prompt_build`: receives the current prompt and session messages.
+- `before_prompt_build`: receives the model-facing `prompt` and session messages.
+  Harnesses that project history into `prompt` can also supply `originalPrompt`:
+  the current request before history projection, including current inbound
+  context when present. The Codex harness supplies this field on each prompt
+  build. Recall plugins can use `originalPrompt ?? prompt` to keep the recall
+  query stable across continuity rebuilds without discarding model-facing history.
   Return `prependContext`, `appendContext`, `systemPrompt`,
   `prependSystemContext`, `appendSystemContext`, or `toolsAllow`. `toolsAllow`
   can only narrow the host-resolved tool surface for the current turn; `[]`
