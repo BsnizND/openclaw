@@ -2074,10 +2074,15 @@ describe("active-memory plugin", () => {
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
   });
 
-  it.each([0, 1_490])(
-    "continues model recall after %d ms preflight when trigger lookup times out",
-    async (preflightMs) => {
-      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  it.each([
+    [0, 0],
+    [1_490, 0],
+    [1_490, -60_000],
+    [1_490, 60_000],
+  ])(
+    "continues model recall after %d ms preflight with a %d ms wall-clock shift",
+    async (preflightMs, wallClockShiftMs) => {
+      vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
       vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
         const controller = new AbortController();
         setTimeout(() => controller.abort(new Error("trigger lookup timeout")), delay);
@@ -2086,16 +2091,19 @@ describe("active-memory plugin", () => {
       vi.spyOn(api.runtime.state, "openKeyedStore").mockReturnValue({
         lookup: async () =>
           await new Promise<undefined>((resolve) => {
-            setTimeout(() => resolve(undefined), preflightMs);
+            setTimeout(() => {
+              vi.setSystemTime(Date.now() + wallClockShiftMs);
+              resolve(undefined);
+            }, preflightMs);
           }),
       });
       hoisted.getActiveMemorySearchManager.mockImplementationOnce(
         () => new Promise<never>(() => {}),
       );
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       let recallStartedAt: number | undefined;
       runEmbeddedAgent.mockImplementationOnce(async (params: { sessionFile: string }) => {
-        recallStartedAt = Date.now();
+        recallStartedAt = performance.now();
         await writeUsableMemoryTranscript(
           params.sessionFile,
           "lemon pepper wings with blue cheese",
@@ -2113,8 +2121,8 @@ describe("active-memory plugin", () => {
       );
       await vi.advanceTimersByTimeAsync(preflightMs + 1_500);
 
-      expectPrependContextResult(await result);
       expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
+      expectPrependContextResult(await result);
       expect(recallStartedAt).toBe(startedAt + 1_500);
       expect(hasWarnLine("preflight timed out")).toBe(false);
     },
@@ -4633,7 +4641,7 @@ describe("active-memory plugin", () => {
   });
 
   it("preserves recall settlement time after near-limit preflight latency", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
     testing.setMinimumTimeoutMsForTests(1);
     testing.setSetupGraceTimeoutMsForTests(0);
     testing.setTimeoutPartialDataGraceMsForTests(100);
