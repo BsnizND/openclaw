@@ -751,11 +751,11 @@ budget:
 }
 ```
 
-Worst-case blocking time is `timeoutMs + setupGraceTimeoutMs + 4500` ms (the
-configured recall-work budget, plus up to 1500 ms preflight, up to 1500 ms
-for optional trigger lookup, and a fixed 1500 ms post-recall completion
-allowance). A trigger lookup timeout skips that optional context and lets
-model recall continue. The embedded recall runner uses
+Worst-case blocking time is `timeoutMs + setupGraceTimeoutMs + 3000` ms (the
+configured recall-work budget, plus up to 1500 ms preflight, plus a fixed
+1500 ms post-recall completion allowance). Optional trigger lookup uses only
+the remaining preflight allowance; its timeout skips optional context and
+lets eligible model recall continue. The embedded recall runner uses
 the same effective timeout budget, so `setupGraceTimeoutMs` covers both the
 outer prompt-build watchdog and the inner blocking recall run.
 

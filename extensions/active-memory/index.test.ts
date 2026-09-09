@@ -767,8 +767,8 @@ describe("active-memory plugin", () => {
     const [hookName, handler, options] = firstHookRegistration();
     expect(hookName).toBe("before_prompt_build");
     expect(typeof handler).toBe("function");
-    expect(options).toEqual({ timeoutMs: 154_500, requiresToolAuthority: true });
-    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(154_500);
+    expect(options).toEqual({ timeoutMs: 153_000, requiresToolAuthority: true });
+    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(153_000);
     expect(hooks.before_model_resolve).toBeUndefined();
     expect(typeof hooks.agent_end).toBe("function");
   });
@@ -834,13 +834,13 @@ describe("active-memory plugin", () => {
   it("keeps the outer hook timeout at the live-config ceiling", () => {
     registerPluginConfig({ timeoutMs: 90_000 });
 
-    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(154_500);
+    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(153_000);
   });
 
   it("covers the maximum recall and setup-grace budgets", () => {
     registerPluginConfig({ timeoutMs: 90_000, setupGraceTimeoutMs: 30_000 });
 
-    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(154_500);
+    expect(hookOptions.before_prompt_build?.timeoutMs).toBe(153_000);
   });
 
   it("runs recall without recording shared auth-profile failures", async () => {
@@ -2092,6 +2092,16 @@ describe("active-memory plugin", () => {
       hoisted.getActiveMemorySearchManager.mockImplementationOnce(
         () => new Promise<never>(() => {}),
       );
+      const startedAt = Date.now();
+      let recallStartedAt: number | undefined;
+      runEmbeddedAgent.mockImplementationOnce(async (params: { sessionFile: string }) => {
+        recallStartedAt = Date.now();
+        await writeUsableMemoryTranscript(
+          params.sessionFile,
+          "lemon pepper wings with blue cheese",
+        );
+        return { payloads: [{ text: "- lemon pepper wings\n- blue cheese" }] };
+      });
 
       const result = runPromptBuild(
         { prompt: "what did we decide?" },
@@ -2105,6 +2115,7 @@ describe("active-memory plugin", () => {
 
       expectPrependContextResult(await result);
       expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
+      expect(recallStartedAt).toBe(startedAt + 1_500);
       expect(hasWarnLine("preflight timed out")).toBe(false);
     },
   );
