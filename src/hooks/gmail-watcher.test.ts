@@ -639,18 +639,18 @@ describe("startGmailWatcher", () => {
     {
       name: "split address-in-use marker",
       chunks: ["address alre", "ady in use\n"],
-      expectedChildren: 1,
+      expectedChildren: 2,
     },
     {
       name: "final bind fragment after exit",
       chunks: ["address alre", "ady in use\n"],
       exitAfterChunk: 0,
-      expectedChildren: 1,
+      expectedChildren: 2,
     },
     {
       name: "marker completed before tail truncation",
       chunks: ["address alre", `ady in use ${"x".repeat(800)}`],
-      expectedChildren: 1,
+      expectedChildren: 2,
     },
     {
       name: "non-bind stderr",
