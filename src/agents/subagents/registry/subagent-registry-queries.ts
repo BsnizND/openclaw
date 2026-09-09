@@ -27,6 +27,7 @@ function resolveConcurrencyOwnerSessionKey(entry: SubagentRunRecord): string {
 function isDeliveryTerminalForRequesterSettle(entry: Pick<SubagentRunRecord, "delivery">): boolean {
   return (
     isDeliverySuspended(entry) ||
+    entry.delivery?.status === "failed" ||
     entry.delivery?.disposition === "delivered" ||
     entry.delivery?.disposition === "intentional_non_delivery" ||
     entry.delivery?.disposition === "permanent_failure"
@@ -508,9 +509,8 @@ export function countPendingDescendantRunsFromRuns(
 
 /**
  * True when any descendant below a root session has not reached a terminal
- * settle. Differs from the pending count in one way: a run whose final
- * delivery was suspended counts as settled — suspension is terminal for
- * automatic announce retries, so requester-drain decisions must not wait on it.
+ * settle. Failed, suspended, and explicitly settled deliveries release
+ * requester drain while unfinished cleanup remains visible to pending counts.
  */
 export function hasDescendantRunAwaitingSettleFromRuns(
   runs: Map<string, SubagentRunRecord>,
