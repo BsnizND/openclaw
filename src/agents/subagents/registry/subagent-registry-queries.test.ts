@@ -738,6 +738,47 @@ describe("hasDescendantRunAwaitingSettleFromRuns", () => {
     expect(hasDescendantRunAwaitingSettleFromRuns(runs, requester)).toBe(false);
   });
 
+  it.each([undefined, "retryable"] as const)(
+    "settles a later sibling after failed delivery with disposition %s while retaining cleanup",
+    (disposition) => {
+      const now = Date.now();
+      const older = makeRun({
+        runId: "run-older-failed",
+        requesterSessionKey: requester,
+        createdAt: now - 60_000,
+        endedAt: now - 50_000,
+        expectsCompletionMessage: true,
+        suppressCompletionDelivery: true,
+        delivery: { status: "failed", disposition },
+      });
+      const runs = toRunMap([older]);
+      const later = makeRun({
+        runId: "run-later",
+        requesterSessionKey: requester,
+        createdAt: now - 5_000,
+        startedAt: now - 5_000,
+        expectsCompletionMessage: true,
+        delivery: { status: "pending" },
+      });
+      runs.set(later.runId, later);
+      expect(hasDescendantRunAwaitingSettleFromRuns(runs, requester)).toBe(true);
+
+      later.execution = { ...later.execution, status: "terminal", endedAt: now - 1_000 };
+      expect(hasDescendantRunAwaitingSettleFromRuns(runs, requester, later.runId)).toBe(false);
+      expect(countPendingDescendantRunsFromRuns(runs, requester)).toBe(2);
+      expect(older.cleanupCompletedAt).toBeUndefined();
+
+      const grandchild = makeRun({
+        runId: "run-live-grandchild",
+        requesterSessionKey: older.childSessionKey,
+        createdAt: now - 3_000,
+        startedAt: now - 3_000,
+      });
+      runs.set(grandchild.runId, grandchild);
+      expect(hasDescendantRunAwaitingSettleFromRuns(runs, requester, later.runId)).toBe(true);
+    },
+  );
+
   it("waits for queued completion delivery, then settles after delivery or dismissal", () => {
     const now = Date.now();
     const run = makeRun({
