@@ -216,9 +216,11 @@ export async function deliverOutboundPayloadsCore(
     params.onPayloadDeliveryOutcome?.(outcome);
   }
   const deliveredMirrorPayloads: NormalizedOutboundPayload[] = [];
+  const deliveredMirrorSourceIndexes: number[] = [];
   const recordDeliveredPayload = async (
     payloadSummary: NormalizedOutboundPayload,
     deliveredResults: readonly OutboundDeliveryResult[],
+    sourceIndex: number,
   ): Promise<void> => {
     if (deliveredResults.length === 0) {
       return;
@@ -245,6 +247,7 @@ export async function deliverOutboundPayloadsCore(
     }
     if (params.mirror) {
       deliveredMirrorPayloads.push(mirroredPayload);
+      deliveredMirrorSourceIndexes.push(sourceIndex);
     }
   };
   // `policyKey` is a diagnostics-only fallback; never use it for hook correlation.
@@ -477,7 +480,7 @@ export async function deliverOutboundPayloadsCore(
           status: "sent",
           results: deliveredResults,
         });
-        await recordDeliveredPayload(mirroredPayload, deliveredResults);
+        await recordDeliveredPayload(mirroredPayload, deliveredResults, payloadIndex);
       } else {
         recordPayloadOutcome(
           suppressedPayloadOutcome({
@@ -563,6 +566,7 @@ export async function deliverOutboundPayloadsCore(
   await mirrorDeliveredPayloads({
     delivery: params,
     payloads: deliveredMirrorPayloads,
+    sourceIndexes: deliveredMirrorSourceIndexes,
     channel,
     to,
   });

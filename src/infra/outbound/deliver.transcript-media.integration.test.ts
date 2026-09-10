@@ -17,7 +17,9 @@ import { readVisibleSessionTranscriptMessageEntries } from "../../plugin-sdk/ses
 import { createEmptyPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
+import { PlatformMessageNotDispatchedError } from "./deliver-types.js";
 import type { NormalizedOutboundPayload } from "./payloads.js";
+import { createUnmodifiedPreparedOutboundBatch } from "./prepared-batch.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6j0AAAAASUVORK5CYII=",
@@ -26,6 +28,7 @@ const PNG = Buffer.from(
 const sessionKey = "agent:main:matrix:dm:transcript-fixture";
 const sessionId = "transcript-fixture-session";
 let deliverOutboundPayloads: typeof import("./deliver.js").deliverOutboundPayloads;
+let deliverOutboundPayloadsCore: typeof import("./deliver-core.js").deliverOutboundPayloadsCore;
 
 describe("native outbound transcript image projection", () => {
   const fixture = useTempSessionsFixture("outbound-transcript-media-");
@@ -34,6 +37,8 @@ describe("native outbound transcript image projection", () => {
   let receiptConversation: string;
   let receiptMedia: unknown;
   let mediaWithoutImageFacts: string | undefined;
+  let rejectBeforeDispatchForMedia: string | undefined;
+  let mediaAttempts: ChannelOutboundContext[];
   let failMedia = false;
   let transportSawMessageCount = -1;
 
@@ -42,6 +47,7 @@ describe("native outbound transcript image projection", () => {
 
   beforeAll(async () => {
     ({ deliverOutboundPayloads } = await import("./deliver.js"));
+    ({ deliverOutboundPayloadsCore } = await import("./deliver-core.js"));
   });
 
   beforeEach(async () => {
@@ -54,6 +60,8 @@ describe("native outbound transcript image projection", () => {
     receiptConversation = sessionKey;
     receiptMedia = [{ path: imagePath, contentType: "image/png", kind: "image" }];
     mediaWithoutImageFacts = undefined;
+    rejectBeforeDispatchForMedia = undefined;
+    mediaAttempts = [];
     failMedia = false;
     transportSawMessageCount = -1;
     const sendText = async (ctx: ChannelOutboundContext) => ({
@@ -72,6 +80,13 @@ describe("native outbound transcript image projection", () => {
               deliveryMode: "direct",
               sendText,
               sendMedia: async (ctx) => {
+                mediaAttempts.push(ctx);
+                if (rejectBeforeDispatchForMedia && ctx.mediaUrl === rejectBeforeDispatchForMedia) {
+                  rejectBeforeDispatchForMedia = undefined;
+                  throw new PlatformMessageNotDispatchedError("fixture stopped before dispatch", {
+                    cause: undefined,
+                  });
+                }
                 transportSawMessageCount = (await messages()).length;
                 await ctx.onPlatformSendDispatch?.();
                 if (failMedia) {
@@ -129,6 +144,64 @@ describe("native outbound transcript image projection", () => {
     expect((await messages()).map((entry) => entry.entryId)).toEqual([first[0]?.entryId]);
     await sendImage("independent-image");
     expect(await messages()).toHaveLength(2);
+  });
+
+  it("keeps independent unkeyed direct image sends as separate native rows", async () => {
+    const params = {
+      cfg,
+      channel: "matrix" as const,
+      to: sessionKey,
+      payloads: [{ text: "Here is the image", mediaUrl: "https://example.test/photo.png" }],
+      mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId },
+      queuePolicy: "required" as const,
+    };
+    await deliverOutboundPayloads(params);
+    await deliverOutboundPayloads(params);
+
+    const rows = await messages();
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => readPersistedMediaFacts(row.message)?.length === 1)).toBe(true);
+    expect(rows.every((row) => row.idempotencyKey?.startsWith("outbound-mirror:v1:"))).toBe(true);
+    expect(new Set(rows.map((row) => row.idempotencyKey)).size).toBe(2);
+  });
+
+  it("keeps unkeyed partial prepared-batch subsets distinct and reuses the same subset key", async () => {
+    rejectBeforeDispatchForMedia = "https://example.test/second.png";
+    const payloads = [
+      { text: "Here is the image", mediaUrl: "https://example.test/first.png" },
+      { text: "Here is the image", mediaUrl: "https://example.test/second.png" },
+    ];
+    const preparedBatch = createUnmodifiedPreparedOutboundBatch(payloads);
+    const params = {
+      cfg,
+      channel: "matrix" as const,
+      to: sessionKey,
+      payloads,
+      preparedBatch,
+      deliveryOperationIntentId: "fixture-partial-image-intent",
+      mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId },
+      bestEffort: true,
+    };
+    await deliverOutboundPayloadsCore(params);
+    const first = await messages();
+    expect(first).toHaveLength(1);
+    expect(mediaAttempts).toHaveLength(2);
+
+    const remaining = {
+      ...params,
+      preparedBatch: { ...preparedBatch, entries: preparedBatch.entries.slice(1) },
+    };
+    await deliverOutboundPayloadsCore(remaining);
+    const rows = await messages();
+    expect(mediaAttempts).toHaveLength(3);
+    expect(mediaAttempts[2]?.deliveryOperationId).toBe(mediaAttempts[1]?.deliveryOperationId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.entryId).toBe(first[0]?.entryId);
+    expect(rows.every((row) => readPersistedMediaFacts(row.message)?.length === 1)).toBe(true);
+    expect(new Set(rows.map((row) => row.idempotencyKey)).size).toBe(2);
+
+    await deliverOutboundPayloadsCore(remaining);
+    expect((await messages()).map((row) => row.entryId)).toEqual(rows.map((row) => row.entryId));
   });
 
   it.each([

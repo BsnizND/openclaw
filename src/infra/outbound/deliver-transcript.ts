@@ -3,6 +3,7 @@ import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-
 import { getOwnedSessionTranscriptWriterFence } from "../../config/sessions/transcript-write-context.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
+import { sha256Base64Url } from "../crypto-digest.js";
 import { formatErrorMessage } from "../errors.js";
 import type { DeliverOutboundPayloadsCoreParams } from "./deliver-contracts.js";
 import { transcriptMediaForSession } from "./deliver-transcript-media.js";
@@ -16,6 +17,7 @@ const loadTranscriptRuntime = createLazyRuntimeModule(
 export async function mirrorDeliveredPayloads(params: {
   delivery: DeliverOutboundPayloadsCoreParams;
   payloads: readonly NormalizedOutboundPayload[];
+  sourceIndexes: readonly number[];
   channel: string;
   to: string;
 }): Promise<void> {
@@ -46,6 +48,15 @@ export async function mirrorDeliveredPayloads(params: {
   // Keep mirror failures non-fatal so callers do not retry an already-sent payload.
   try {
     const { appendAssistantMessageToSessionTranscript } = await loadTranscriptRuntime();
+    // Completed logical payloads retain their original prepared indices across replay.
+    // Separate partial subsets while keeping the same subset idempotent under its intent.
+    const idempotencyKey =
+      mirror.idempotencyKey ??
+      (deliveredMirror.media.length && params.delivery.deliveryOperationIntentId
+        ? `outbound-mirror:v1:${sha256Base64Url(
+            JSON.stringify([params.delivery.deliveryOperationIntentId, params.sourceIndexes]),
+          )}`
+        : undefined);
     // Fence against the session this mirror lands in, not whichever run is delivering:
     // a cross-session delivery would otherwise carry the sending run's writer claim.
     const writerFence = getOwnedSessionTranscriptWriterFence({ sessionKey: mirror.sessionKey });
@@ -59,7 +70,7 @@ export async function mirrorDeliveredPayloads(params: {
       ...(writerFence ? { expectedWriterRunId: writerFence.expectedWriterRunId } : {}),
       text: mirrorText ?? undefined,
       ...(deliveredMirror.media.length ? { media: deliveredMirror.media } : {}),
-      idempotencyKey: mirror.idempotencyKey,
+      idempotencyKey,
       deliveryMirror: mirror.deliveryMirror,
       config: params.delivery.cfg,
     });
