@@ -252,6 +252,58 @@ payloads, pins, and post-delivery hooks in that durable batch. Core never
 replaces an explicit caller thread, and it does not infer adoption from
 `receipt.threadId` without the adapter opt-in.
 
+### Per-send operation identity
+
+Queued channel sends receive an opaque `deliveryOperationId` in both message
+and legacy outbound send contexts. Core derives it from the native queue
+intent, original prepared payload index, and transport part index. The same
+part retains its identity during queue recovery; separate payloads, parts, and
+new intents have distinct identities even when their content is identical.
+It is absent for sends that never entered queue custody.
+
+Use it to correlate native channel effects with a send. It does not establish
+whether an ambiguous send succeeded, enable retries, or opt a channel into
+unknown-send reconciliation. `deliveryQueueId` keeps its existing exact
+reconciliation semantics.
+
+### Native transcript images
+
+A transcript-backed transport whose `to` is the canonical OpenClaw session key
+may return `conversationId: to` and `meta.transcriptMedia` on its successful
+outbound result. This opt-in supports complete all-image payloads backed by the
+native media store:
+
+```ts
+return {
+  channel: "demo",
+  messageId: sent.id,
+  conversationId: to,
+  meta: {
+    transcriptMedia: [{ path: saved.path, contentType: saved.contentType, kind: "image" }],
+  },
+};
+```
+
+Return these facts only after the transport succeeds. Each fact must reference
+an existing regular image file inside the native media store. Every attachment
+in the effective payload must be an image, and results must cover all of them
+in send order. Core rejects
+foreign conversation identities, invalid MIME types, missing files, symlinks,
+and incomplete or extra facts.
+
+When the producer's existing transcript mirror targets that same conversation,
+core appends the caption and native image facts in one assistant row, retaining
+the producer's idempotency key and session fence. This also applies to direct
+cron's late mirror. Channels should not write a second transcript row. Mirrors
+in other conversations, ordinary external chat or room IDs that differ from
+the native session key, mixed attachment payloads, and results with absent or
+invalid facts retain their existing text and attachment-name projection. Core
+does not infer a native session from an external destination or map a partial
+set of image facts across mixed attachments.
+
+Transcript projection remains best-effort bookkeeping after a successful send;
+it does not prove device display or make an ambiguous transport safe to replay.
+
 ### Automatic unknown-send reconciliation
 
 Set `message.durableFinal.automaticUnknownSendReconciliation` only when the

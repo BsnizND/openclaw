@@ -1785,6 +1785,43 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     );
   });
 
+  it("passes delivered image facts to the native late mirror with its cron key and session fence", async () => {
+    const route = mockResolvedOutboundRoute();
+    const media = [
+      { path: "/native/media/chart.png", contentType: "image/png", kind: "image" as const },
+    ];
+    vi.mocked(deliverOutboundPayloads).mockImplementationOnce(async (params) => {
+      const payload = { text: "Rendered chart", mediaUrls: ["https://example.com/chart.png"] };
+      params.onPayload?.({ text: "Suppressed draft", mediaUrls: [] });
+      params.onPayload?.(payload);
+      expect(appendAssistantMessageToSessionTranscript).not.toHaveBeenCalled();
+      params.onDeliveredPayload?.({
+        ...payload,
+        transcriptMedia: { conversationId: route.sessionKey, media },
+      });
+      return [{ channel: "telegram", messageId: "tg-image" }];
+    });
+    const params = makeBaseParams({ synthesizedText: "Original chart", runStartedAt: 1_000 });
+    params.deliveryPayloadHasStructuredContent = true;
+    params.deliveryPayloads = [
+      { text: "Original chart", mediaUrl: "https://example.com/chart.png" },
+    ];
+
+    expect((await dispatchCronDelivery(params)).delivered).toBe(true);
+    expect(appendAssistantMessageToSessionTranscript).toHaveBeenCalledOnce();
+    expect(appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: route.sessionKey,
+        expectedSessionId: "test-session-id",
+        expectedLifecycleRevision: "test-lifecycle-revision",
+        idempotencyKey: "cron-direct-delivery:v1:cron:test-job:1000:telegram::123456:",
+        text: "Rendered chart",
+        media,
+        mediaUrls: undefined,
+      }),
+    );
+  });
+
   it("preserves all successful text payloads for direct delivery", async () => {
     const params = makeBaseParams({ synthesizedText: undefined });
     params.deliveryPayloads = [{ text: "Working on it..." }, { text: "Final weather summary" }];

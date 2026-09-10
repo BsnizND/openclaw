@@ -20,6 +20,8 @@ export type OutboundMessageSendOverrides = ReplyToOverride & {
   deliveryPartIndex?: number;
   /** Exact platform-send count for this payload. */
   deliveryPartCount?: number;
+  /** Core-owned opaque identity for this queued platform send. */
+  deliveryOperationId?: string;
 };
 
 /**

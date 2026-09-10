@@ -1,11 +1,13 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMessageReceiptFromOutboundResults } from "../../channels/message/receipt.js";
 import type { ChannelMessageSendTextContext } from "../../channels/message/types.js";
+import type { ChannelOutboundContext } from "../../channels/plugins/outbound.types.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { getDeliveryQueueEntryStatus } from "../delivery-queue-sqlite.js";
+import { PlatformMessageNotDispatchedError } from "./deliver-types.js";
 import {
   boundedCronCompletionRetention,
   drainMatrixReconnect,
@@ -98,4 +100,67 @@ describe("exact Matrix delivery queue reconciliation", () => {
       expect(sendText).toHaveBeenCalledOnce();
     },
   );
+
+  it("keeps ordinary send identities through ordered recovery and separates payloads, media parts, and new intents", async () => {
+    process.env.OPENCLAW_STATE_DIR = tmpDir;
+    const attempts: ChannelOutboundContext[] = [];
+    const send = async (ctx: ChannelOutboundContext) => {
+      attempts.push(ctx);
+      if (attempts.length === 1) {
+        throw new PlatformMessageNotDispatchedError("fixture stopped before dispatch", {
+          cause: undefined,
+        });
+      }
+      await ctx.onPlatformSendDispatch?.();
+      return { channel: "matrix" as const, messageId: `sent-${attempts.length}` };
+    };
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "matrix",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "matrix",
+            outbound: {
+              deliveryMode: "direct",
+              normalizePayload: ({ payload }) => (payload.text === "omit fixture" ? null : payload),
+              sendText: send,
+              sendMedia: send,
+            },
+          }),
+        },
+      ]),
+    );
+    const params = {
+      cfg: {} as OpenClawConfig,
+      channel: "matrix" as const,
+      to: "!room:example",
+      payloads: [
+        { text: "omit fixture" },
+        {
+          text: "caption",
+          mediaUrls: ["https://example.test/a.png", "https://example.test/b.png"],
+        },
+        { text: "caption" },
+      ],
+      queuePolicy: "required" as const,
+    };
+
+    await expect(deliverOutboundPayloads(params)).rejects.toThrow(
+      "fixture stopped before dispatch",
+    );
+    expect(attempts[0]?.deliveryOperationId).toEqual(expect.any(String));
+    const recovery: DeliverFn = async (replay) => deliverOutboundPayloads(replay);
+    await drainMatrixReconnect({ deliver: recovery, stateDir: tmpDir });
+
+    expect(attempts).toHaveLength(4);
+    expect(attempts[1]?.deliveryOperationId).toBe(attempts[0]?.deliveryOperationId);
+    expect(new Set(attempts.slice(1).map((ctx) => ctx.deliveryOperationId)).size).toBe(3);
+    expect(attempts.every((ctx) => ctx.deliveryQueueId === undefined)).toBe(true);
+
+    await deliverOutboundPayloads(params);
+    expect(attempts).toHaveLength(7);
+    const previousIds = new Set(attempts.slice(1, 4).map((ctx) => ctx.deliveryOperationId));
+    expect(attempts.slice(4).every((ctx) => !previousIds.has(ctx.deliveryOperationId))).toBe(true);
+  });
 });

@@ -291,6 +291,7 @@ function createPluginHandler(
     audioAsVoice: overrides?.audioAsVoice,
     deliveryPartIndex: overrides?.deliveryPartIndex,
     deliveryPartCount: overrides?.deliveryPartCount,
+    deliveryOperationId: overrides?.deliveryOperationId,
     preparedMessageId:
       overrides?.deliveryPartIndex === undefined || overrides.deliveryPartIndex === 0
         ? baseCtx.preparedMessageId

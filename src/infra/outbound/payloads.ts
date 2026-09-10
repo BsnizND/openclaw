@@ -26,6 +26,7 @@ import {
 } from "../../interactive/payload.js";
 import type { SilentReplyConversationType } from "../../shared/silent-reply-policy.js";
 import { stripUnsupportedCitationControlMarkers } from "../../shared/text/citation-control-markers.js";
+import type { DeliveredTranscriptMedia } from "./deliver-transcript-media.js";
 
 /** Runtime-ready outbound payload after text/media/rich-content normalization. */
 export type NormalizedOutboundPayload = {
@@ -42,6 +43,8 @@ export type NormalizedOutboundPayload = {
   hookContent?: string;
   /** Preserves the status/answer distinction through delivery hooks. */
   isStatusNotice?: boolean;
+  /** Validated native assets from successful transport receipts, never source payload metadata. */
+  transcriptMedia?: DeliveredTranscriptMedia;
 };
 
 /** JSON-safe outbound payload projection used for envelopes and diagnostics. */
