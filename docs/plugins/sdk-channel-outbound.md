@@ -301,6 +301,13 @@ invalid facts retain their existing text and attachment-name projection. Core
 does not infer a native session from an external destination or map a partial
 set of image facts across mixed attachments.
 
+For queued native image mirrors without an explicit producer key, core derives
+a key from the durable delivery intent and the original prepared source indices
+of the successfully mirrored payloads. Independent sends and partial-batch
+subsets stay separate, while replay of the same subset reuses its key. Captions
+and saved media paths do not define delivery identity. This fallback does not
+change text-only mirrors, queue recovery, or unknown-send reconciliation.
+
 Transcript projection remains best-effort bookkeeping after a successful send;
 it does not prove device display or make an ambiguous transport safe to replay.
 

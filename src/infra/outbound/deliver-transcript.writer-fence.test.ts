@@ -36,6 +36,7 @@ async function mirrorInto(sessionKey: string): Promise<void> {
       mirror: { agentId: "wolf", sessionKey },
     } as unknown as DeliverOutboundPayloadsCoreParams,
     payloads: [payload("delivered to the user")],
+    sourceIndexes: [0],
     channel: "discord",
     to: "1497965766035640391",
   });
