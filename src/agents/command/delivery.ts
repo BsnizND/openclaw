@@ -962,6 +962,9 @@ export async function deliverAgentCommandResult(
     if (deliveryTarget && !deliveryStatus) {
       params.assertDeliveryCurrent?.();
       const restartAbort = createRestartOnlyAbortSignal(opts.abortSignal);
+      const expectedMirrorSessionId = normalizeDeliverySessionId(
+        params.expectedSessionIdForFreshDelivery ?? sessionEntry?.sessionId,
+      );
       let send: DurableSendResult;
       try {
         send = await sendDurableMessageBatchCore({
@@ -971,6 +974,21 @@ export async function deliverAgentCommandResult(
           accountId: resolvedAccountId,
           payloads: deliveryPayloads,
           session: outboundSession,
+          // Generated-media completion has already persisted its assistant caption.
+          // Carry successful native image receipts through the durable mirror owner;
+          // external and cross-session routes must not append to the source transcript.
+          mirror:
+            hasNonEmptyStringArray(opts.internalDeliveryMediaUrls) &&
+            effectiveSessionKey &&
+            deliveryTarget === effectiveSessionKey &&
+            expectedMirrorSessionId
+              ? {
+                  agentId: deliveryAgentId,
+                  sessionKey: effectiveSessionKey,
+                  expectedSessionId: expectedMirrorSessionId,
+                  nativeMediaOnly: true,
+                }
+              : undefined,
           identity: resolveAgentOutboundIdentity(cfg, deliveryAgentId),
           replyPayloadSendingHook: {
             kind: "final",

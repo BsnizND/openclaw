@@ -7,6 +7,7 @@ import type {
 } from "../../channels/plugins/types.public.js";
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { DeliveryMirror } from "../../infra/outbound/mirror.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { normalizeSessionDeliveryState } from "../../utils/delivery-context.shared.js";
@@ -182,6 +183,7 @@ function latestOutboundDeliveryArgs(): {
   payloads: ReplyPayload[];
   bestEffort?: boolean;
   queuePolicy?: string;
+  mirror?: DeliveryMirror;
   replyPayloadSendingHook?: ReplyPayloadSendingHookArgs;
 } {
   const args = lastMockArg(deliverOutboundPayloadsMock, "outbound delivery arguments");
@@ -197,6 +199,7 @@ function latestOutboundDeliveryArgs(): {
     payloads: ReplyPayload[];
     bestEffort?: boolean;
     queuePolicy?: string;
+    mirror?: DeliveryMirror;
     replyPayloadSendingHook?: ReplyPayloadSendingHookArgs;
   };
 }
@@ -282,6 +285,77 @@ describe("deliverAgentCommandResult payload normalization", () => {
 
   afterEach(() => {
     setActivePluginRegistry(emptyRegistry);
+  });
+
+  it("binds generated-image mirroring to the effective outbound session and admitted session id", async () => {
+    const effectiveKey = "agent:tester:slack:dm:generated-fixture";
+    await deliverAgentCommandResultForTest({
+      opts: {
+        sessionKey: "agent:main:slack:dm:stale-fixture",
+        replyTo: effectiveKey,
+        internalDeliveryMediaUrls: ["/tmp/generated-image.png"],
+      },
+      outboundSession: { key: effectiveKey, agentId: "tester" },
+      sessionEntry: { sessionId: "stale-session-id", updatedAt: 1 },
+      expectedSessionIdForFreshDelivery: "admitted-session-id",
+      resolveFreshSessionEntryForDelivery: async () => undefined,
+      payloads: [{ text: "Image ready", mediaUrls: ["/tmp/generated-image.png"] }],
+    });
+
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mirror: {
+          agentId: "tester",
+          sessionKey: effectiveKey,
+          expectedSessionId: "admitted-session-id",
+          nativeMediaOnly: true,
+        },
+      }),
+    );
+  });
+
+  it.each([
+    { name: "generated completion", mediaUrls: ["/tmp/generated.png"], mirrors: true },
+    { name: "ordinary command", mediaUrls: undefined, mirrors: false },
+    { name: "empty completion", mediaUrls: [], mirrors: false },
+    { name: "blank completion", mediaUrls: [" "], mirrors: false },
+    {
+      name: "external target",
+      mediaUrls: ["/tmp/generated.png"],
+      target: "channel:C123",
+      mirrors: false,
+    },
+    {
+      name: "unfenced session",
+      mediaUrls: ["/tmp/generated.png"],
+      omitSessionId: true,
+      mirrors: false,
+    },
+  ])("scopes native image mirroring for $name", async (testCase) => {
+    const nativeKey = "agent:main:slack:dm:generated-fixture";
+    await deliverAgentCommandResultForTest({
+      opts: {
+        sessionKey: nativeKey,
+        replyTo: testCase.target ?? nativeKey,
+        internalDeliveryMediaUrls: testCase.mediaUrls,
+      },
+      sessionEntry: testCase.omitSessionId
+        ? undefined
+        : { sessionId: "image-session", updatedAt: 1 },
+      payloads: [{ text: "Image ready", mediaUrls: ["/tmp/generated.png"] }],
+    });
+
+    const deliveryArgs = latestOutboundDeliveryArgs();
+    if (testCase.mirrors) {
+      expect(deliveryArgs).toHaveProperty("mirror", {
+        agentId: "main",
+        sessionKey: nativeKey,
+        expectedSessionId: "image-session",
+        nativeMediaOnly: true,
+      });
+    } else {
+      expect(deliveryArgs.mirror).toBeUndefined();
+    }
   });
 
   it.each([

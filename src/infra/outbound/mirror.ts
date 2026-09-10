@@ -17,6 +17,8 @@ export type OutboundMirror = {
  * Delivery-layer mirror data with optional group/channel correlation metadata.
  */
 export type DeliveryMirror = OutboundMirror & {
+  /** Append only validated native image receipts when the agent already owns its caption. */
+  nativeMediaOnly?: boolean;
   /** Whether this message is being sent in a group/channel context */
   isGroup?: boolean;
   /** Group or channel identifier for correlation with received events */

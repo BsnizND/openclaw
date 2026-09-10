@@ -39,6 +39,7 @@ const sessionKey = "agent:main:matrix:dm:transcript-fixture";
 const sessionId = "transcript-fixture-session";
 let deliverOutboundPayloads: typeof import("./deliver.js").deliverOutboundPayloads;
 let deliverOutboundPayloadsCore: typeof import("./deliver-core.js").deliverOutboundPayloadsCore;
+let deliverAgentCommandResult: typeof import("../../agents/command/delivery.js").deliverAgentCommandResult;
 
 describe("native outbound transcript image projection", () => {
   const fixture = useTempSessionsFixture("outbound-transcript-media-");
@@ -72,6 +73,7 @@ describe("native outbound transcript image projection", () => {
   beforeAll(async () => {
     ({ deliverOutboundPayloads } = await import("./deliver.js"));
     ({ deliverOutboundPayloadsCore } = await import("./deliver-core.js"));
+    ({ deliverAgentCommandResult } = await import("../../agents/command/delivery.js"));
   });
 
   beforeEach(async () => {
@@ -150,6 +152,95 @@ describe("native outbound transcript image projection", () => {
       mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId, idempotencyKey },
       queuePolicy: "required",
     });
+
+  it("persists a generated command image after native delivery without duplicating its existing caption", async () => {
+    const caption = "Here is the generated image";
+    await appendAssistantMessageToSessionTranscript({
+      ...scope(),
+      expectedSessionId: sessionId,
+      text: caption,
+      config: cfg,
+    });
+    const captionRows = await messages();
+
+    const result = await deliverAgentCommandResult({
+      cfg,
+      deps: {},
+      runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
+      opts: {
+        message: "generated image completion",
+        deliver: true,
+        replyChannel: "matrix",
+        replyTo: sessionKey,
+        sessionKey,
+        internalDeliveryMediaUrls: [imagePath],
+        sourceReplyDeliveryMode: "automatic",
+        forceRestartSafeTools: true,
+        disableMessageTool: true,
+      },
+      outboundSession: { key: sessionKey, agentId: "main" },
+      sessionEntry: { sessionId, updatedAt: 1 },
+      result: { meta: { durationMs: 1 } },
+      payloads: [{ text: caption, mediaUrls: [imagePath] }],
+    });
+
+    expect(result.deliverySucceeded).toBe(true);
+    expect(mediaAttempts).toHaveLength(1);
+    expect(transportSawMessageCount).toBe(1);
+    const rows = await messages();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.entryId).toBe(captionRows[0]?.entryId);
+    expect(rows[1]?.message).toMatchObject({ role: "assistant", content: [] });
+    expect(readPersistedMediaFacts(rows[1]!.message)).toMatchObject([
+      { path: imagePath, contentType: "image/png", kind: "image" },
+    ]);
+    expect((await projectedMessages())[1]).toMatchObject({
+      content: [
+        expect.objectContaining({
+          type: "image",
+          url: expect.stringMatching(/^\/api\/chat\/media\/outgoing\/.+\/full$/),
+        }),
+      ],
+    });
+    expect(managedRecords()).toMatchObject([
+      { record: { messageId: rows[1]?.entryId, sessionKey, retentionClass: "history" } },
+    ]);
+  });
+
+  it.each(["missing receipt", "foreign receipt", "invalid receipt", "failed image"])(
+    "adds no caption or filename fallback for a native-media-only mirror with %s",
+    async (defect) => {
+      const mediaUrl = "https://example.test/generated.png";
+      if (defect === "missing receipt") {
+        mediaWithoutImageFacts = mediaUrl;
+      }
+      if (defect === "foreign receipt") {
+        receiptConversation = "agent:main:matrix:dm:other-fixture";
+      }
+      if (defect === "invalid receipt") {
+        receiptMedia = [{ path: fixture.storePath(), contentType: "image/png", kind: "image" }];
+      }
+      failMedia = defect === "failed image";
+      await deliverOutboundPayloads({
+        cfg,
+        channel: "matrix",
+        to: sessionKey,
+        payloads: [{ text: "Already persisted text" }, { text: "Image caption", mediaUrl }],
+        mirror: {
+          agentId: "main",
+          sessionKey,
+          expectedSessionId: sessionId,
+          nativeMediaOnly: true,
+        },
+        bestEffort: true,
+        queuePolicy: "required",
+      });
+
+      expect(mediaAttempts).toHaveLength(1);
+      expect(await messages()).toHaveLength(0);
+      expect(managedRecords()).toEqual([]);
+    },
+  );
 
   it("persists one image-and-caption row after transport, reuses its producer key, and keeps independent sends distinct", async () => {
     await sendImage();

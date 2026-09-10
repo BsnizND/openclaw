@@ -26,13 +26,17 @@ export async function mirrorDeliveredPayloads(params: {
     return;
   }
   const deliveredMirror = {
-    text: params.payloads
-      .map((payload) => payload.hookContent ?? resolveOutboundPayloadMirrorText(payload))
-      .filter((text) => text.trim())
-      .join("\n"),
-    mediaUrls: params.payloads.flatMap((payload) =>
-      transcriptMediaForSession(payload, mirror.sessionKey).length ? [] : payload.mediaUrls,
-    ),
+    text: mirror.nativeMediaOnly
+      ? ""
+      : params.payloads
+          .map((payload) => payload.hookContent ?? resolveOutboundPayloadMirrorText(payload))
+          .filter((text) => text.trim())
+          .join("\n"),
+    mediaUrls: mirror.nativeMediaOnly
+      ? []
+      : params.payloads.flatMap((payload) =>
+          transcriptMediaForSession(payload, mirror.sessionKey).length ? [] : payload.mediaUrls,
+        ),
     media: params.payloads.flatMap((payload) =>
       transcriptMediaForSession(payload, mirror.sessionKey),
     ),
