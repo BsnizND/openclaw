@@ -307,6 +307,14 @@ invalid facts retain their existing text and attachment-name projection. Core
 does not infer a native session from an external destination or map a partial
 set of image facts across mixed attachments.
 
+Automatic generated-media completion already persists the agent's caption. Its
+final delivery therefore requests a native-media-only mirror when the destination
+is the same canonical session key and the expected session identity is known.
+Core appends only validated image facts to that conversation, without duplicating
+the caption or falling back to attachment filenames. Failed sends and absent,
+invalid, or foreign image facts do not create a second assistant row. The existing
+durable delivery identity and session writer fence still govern that append.
+
 The shared transcript writer prepares managed outgoing-image display blocks
 inside the native writer queue and binds them to the committed message before
 publication. Chat history exposes the existing authenticated outgoing-media URLs;
