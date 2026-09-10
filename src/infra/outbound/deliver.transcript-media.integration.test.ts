@@ -4,18 +4,28 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { ChannelOutboundContext } from "../../channels/plugins/outbound.types.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { replaceSessionEntry } from "../../config/sessions/session-accessor.js";
+import { replaceSessionEntrySync } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import { useTempSessionsFixture } from "../../config/sessions/test-helpers.js";
+import { appendAssistantMessageToSessionTranscript } from "../../config/sessions/transcript.js";
 import {
   appendAdmittedDirectCronDeliveryTranscriptMirror,
   projectDeliveredDirectCronPayloadsForMirror,
   resolveDirectCronTranscriptMirrorText,
 } from "../../cron/isolated-agent/delivery-dispatch-awareness.js";
 import type { CronJob } from "../../cron/types.js";
+import {
+  projectChatDisplayMessages,
+  sanitizeChatHistoryMessages,
+} from "../../gateway/chat-display-projection.js";
+import * as managedMedia from "../../gateway/managed-image-attachments.js";
+import { listManagedImageRecordEntries } from "../../gateway/managed-image-record-store.js";
 import { readPersistedMediaFacts } from "../../media/media-facts.js";
+import type { MediaFact } from "../../media/media-facts.js";
 import { saveMediaBuffer } from "../../media/store.js";
 import { readVisibleSessionTranscriptMessageEntries } from "../../plugin-sdk/session-transcript-runtime.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import { readSessionTranscriptRunId } from "../../sessions/transcript-events.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { PlatformMessageNotDispatchedError } from "./deliver-types.js";
 import type { NormalizedOutboundPayload } from "./payloads.js";
@@ -44,6 +54,20 @@ describe("native outbound transcript image projection", () => {
 
   const scope = () => ({ agentId: "main", sessionId, sessionKey, storePath: fixture.storePath() });
   const messages = async () => readVisibleSessionTranscriptMessageEntries(scope());
+  const managedRecords = () =>
+    listManagedImageRecordEntries({ stateDir: path.resolve(fixture.sessionsDir(), "../../..") });
+  const projectedMessages = async () =>
+    sanitizeChatHistoryMessages(
+      projectChatDisplayMessages((await messages()).map((row) => row.message)),
+    );
+  const appendNativeImage = () => ({
+    ...scope(),
+    expectedSessionId: sessionId,
+    text: "Native image",
+    media: [{ path: imagePath, contentType: "image/png", kind: "image" as const }],
+    idempotencyKey: "native-fixture-image",
+    config: cfg,
+  });
 
   beforeAll(async () => {
     ({ deliverOutboundPayloads } = await import("./deliver.js"));
@@ -111,6 +135,7 @@ describe("native outbound transcript image projection", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetPluginRuntimeStateForTest();
     setActivePluginRegistry(createEmptyPluginRegistry());
     vi.unstubAllEnvs();
@@ -141,10 +166,207 @@ describe("native outbound transcript image projection", () => {
     ]);
 
     await sendImage();
+    const originalAssetIds = managedRecords().map(({ record }) => record.attachmentId);
+    expect(originalAssetIds).toHaveLength(1);
     expect((await messages()).map((entry) => entry.entryId)).toEqual([first[0]?.entryId]);
+    expect(managedRecords().map(({ record }) => record.attachmentId)).toEqual(originalAssetIds);
     await sendImage("independent-image");
     expect(await messages()).toHaveLength(2);
+    expect(managedRecords()).toHaveLength(2);
   });
+
+  it("projects managed media for an expected-session append carrying a run ID", async () => {
+    await appendAssistantMessageToSessionTranscript({ ...appendNativeImage(), runId: "image-run" });
+    const rows = await messages();
+    expect(readSessionTranscriptRunId(rows[0]?.message)).toBe("image-run");
+    expect((await projectedMessages())[0]).toMatchObject({
+      content: expect.arrayContaining([
+        expect.objectContaining({ type: "image", url: expect.any(String) }),
+      ]),
+    });
+    expect(managedRecords()).toMatchObject([
+      { record: { messageId: rows[0]?.entryId, retentionClass: "history" } },
+    ]);
+  });
+
+  it.each(["caption", "image"])(
+    "rejects changed %s under the same native key while retaining the original asset",
+    async (change) => {
+      const params = appendNativeImage();
+      await appendAssistantMessageToSessionTranscript(params);
+      const first = await messages();
+      const originalAssetIds = managedRecords().map(({ record }) => record.attachmentId);
+      const secondImage = await saveMediaBuffer(
+        PNG,
+        "image/png",
+        "outbound-fixture",
+        1024,
+        "second.png",
+      );
+      await expect(
+        appendAssistantMessageToSessionTranscript({
+          ...params,
+          ...(change === "caption"
+            ? { text: "Changed caption" }
+            : {
+                media: [{ path: secondImage.path, contentType: "image/png", kind: "image" }],
+              }),
+        }),
+      ).rejects.toThrow(/idempotency|conflict/i);
+      expect((await messages()).map((row) => row.entryId)).toEqual(first.map((row) => row.entryId));
+      expect(managedRecords().map(({ record }) => record.attachmentId)).toEqual(originalAssetIds);
+    },
+  );
+
+  it("cleans newly prepared media when session ownership changes before commit", async () => {
+    const createBlocks = managedMedia.createManagedOutgoingMediaBlocks;
+    let prepared = false;
+    vi.spyOn(managedMedia, "createManagedOutgoingMediaBlocks").mockImplementationOnce(
+      async (params) => {
+        const blocks = await createBlocks(params);
+        prepared = blocks.length === 1;
+        replaceSessionEntrySync(scope(), {
+          sessionId,
+          updatedAt: 2,
+          chatType: "direct",
+          lifecycleRevision: "replacement-revision",
+        });
+        return blocks;
+      },
+    );
+    await expect(
+      appendAssistantMessageToSessionTranscript({
+        ...appendNativeImage(),
+        expectedLifecycleRevision: null,
+      }),
+    ).resolves.toMatchObject({ ok: false, code: "session-rebound" });
+    expect(prepared).toBe(true);
+    expect(await messages()).toHaveLength(0);
+    expect(managedRecords()).toEqual([]);
+    expect(
+      await fs.readdir(path.resolve(path.dirname(imagePath), "../outgoing/originals")),
+    ).toEqual([]);
+  });
+
+  it("retains committed media after a publication callback fails and reuses it on retry", async () => {
+    const params = appendNativeImage();
+    await expect(
+      appendAssistantMessageToSessionTranscript({
+        ...params,
+        onMessageCommitted: () => {
+          throw new Error("fixture publication failed");
+        },
+      }),
+    ).rejects.toThrow("fixture publication failed");
+    const first = await messages();
+    expect(first).toHaveLength(1);
+    const originalAssetIds = managedRecords().map(({ record }) => record.attachmentId);
+    expect(originalAssetIds).toHaveLength(1);
+    await expect(appendAssistantMessageToSessionTranscript(params)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect((await messages()).map((row) => row.entryId)).toEqual(first.map((row) => row.entryId));
+    expect(managedRecords().map(({ record }) => record.attachmentId)).toEqual(originalAssetIds);
+    expect(managedRecords()[0]?.record.retentionClass).toBe("history");
+  });
+
+  it("projects native mirror images as authenticated outgoing media bound to the committed row", async () => {
+    await sendImage();
+    const rows = await messages();
+    const projected = sanitizeChatHistoryMessages(
+      projectChatDisplayMessages(rows.map((row) => row.message)),
+    );
+    expect(projected[0]).toMatchObject({
+      content: expect.arrayContaining([
+        expect.objectContaining({
+          type: "image",
+          url: expect.stringMatching(/^\/api\/chat\/media\/outgoing\/.+\/full$/),
+        }),
+      ]),
+    });
+    expect(JSON.stringify(projected)).not.toContain(imagePath);
+    expect(
+      listManagedImageRecordEntries({
+        stateDir: path.resolve(fixture.sessionsDir(), "../../.."),
+      }),
+    ).toMatchObject([
+      { record: { messageId: rows[0]?.entryId, sessionKey, retentionClass: "history" } },
+    ]);
+  });
+
+  it.each(["document", "mixed", "remote", "incomplete"])(
+    "preserves %s transcript media through the existing native projection",
+    async (kind) => {
+      const savedDocument = await saveMediaBuffer(
+        Buffer.from("%PDF-1.4\nfixture\n%%EOF"),
+        "application/pdf",
+        "outbound-fixture",
+        1024,
+        "report.pdf",
+      );
+      const document: MediaFact = {
+        path: savedDocument.path,
+        kind: "document",
+        contentType: "application/pdf",
+      };
+      const cases: Record<string, MediaFact[]> = {
+        document: [document],
+        mixed: [...appendNativeImage().media, document],
+        remote: [
+          { url: "https://example.test/remote.png", kind: "image", contentType: "image/png" },
+        ],
+        incomplete: [{ kind: "image", contentType: "image/png" }],
+      };
+      const media = cases[kind]!;
+      const text = `Existing ${kind} attachment`;
+      await expect(
+        appendAssistantMessageToSessionTranscript({
+          ...appendNativeImage(),
+          text,
+          media,
+          mediaUrls: ["https://example.test/attachment"],
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      const rows = await messages();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.message).toMatchObject({
+        content: [{ type: "text", text: `${text}\nattachment` }],
+      });
+      expect(readPersistedMediaFacts(rows[0]!.message)).toMatchObject(media);
+      expect(managedRecords()).toEqual([]);
+    },
+  );
+
+  it.each(["SVG", "PNG then SVG"])(
+    "preserves the native transcript when managed preparation rejects %s and cleans partial assets",
+    async (sequence) => {
+      const svg = await saveMediaBuffer(
+        Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" /></svg>',
+        ),
+        "image/svg+xml",
+        "outbound-fixture",
+        1024,
+        "drawing.svg",
+      );
+      const params = appendNativeImage();
+      const media: MediaFact[] = [
+        ...(sequence === "PNG then SVG" ? params.media : []),
+        { path: svg.path, kind: "image", contentType: "image/svg+xml" },
+      ];
+      await expect(
+        appendAssistantMessageToSessionTranscript({ ...params, media }),
+      ).resolves.toMatchObject({ ok: true });
+      const rows = await messages();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.message).toMatchObject({ content: [{ type: "text", text: params.text }] });
+      expect(readPersistedMediaFacts(rows[0]!.message)).toMatchObject(media);
+      expect(managedRecords()).toEqual([]);
+      expect(
+        await fs.readdir(path.resolve(path.dirname(imagePath), "../outgoing/originals")),
+      ).toEqual([]);
+    },
+  );
 
   it("keeps independent unkeyed direct image sends as separate native rows", async () => {
     const params = {
@@ -286,6 +508,17 @@ describe("native outbound transcript image projection", () => {
     expect(rows[0]?.idempotencyKey).toBe(mirror.idempotencyKey);
     expect(readPersistedMediaFacts(rows[0]!.message)).toMatchObject([
       { path: imagePath, contentType: "image/png", kind: "image" },
+    ]);
+    expect((await projectedMessages())[0]).toMatchObject({
+      content: [
+        expect.objectContaining({
+          type: "image",
+          url: expect.stringMatching(/^\/api\/chat\/media\/outgoing\//),
+        }),
+      ],
+    });
+    expect(managedRecords()).toMatchObject([
+      { record: { messageId: rows[0]?.entryId, retentionClass: "history" } },
     ]);
   });
 

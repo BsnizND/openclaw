@@ -301,6 +301,15 @@ invalid facts retain their existing text and attachment-name projection. Core
 does not infer a native session from an external destination or map a partial
 set of image facts across mixed attachments.
 
+The shared transcript writer prepares managed outgoing-image display blocks
+inside the native writer queue and binds them to the committed message before
+publication. Chat history exposes the existing authenticated outgoing-media URLs;
+local native media paths remain private. A keyed retry reuses its original display
+assets while native comparison still rejects changed captions or image facts.
+If managed display preparation fails, the original caption and attachment facts
+remain eligible for the native transcript write. Rejected writes remove only
+newly prepared, uncommitted assets.
+
 For queued native image mirrors without an explicit producer key, core derives
 a key from the durable delivery intent and the original prepared source indices
 of the successfully mirrored payloads. Independent sends and partial-batch
