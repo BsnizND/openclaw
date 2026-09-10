@@ -5,6 +5,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { formatErrorMessage } from "../errors.js";
 import type { DeliverOutboundPayloadsCoreParams } from "./deliver-contracts.js";
+import { transcriptMediaForSession } from "./deliver-transcript-media.js";
 import { resolveOutboundPayloadMirrorText, type NormalizedOutboundPayload } from "./payloads.js";
 
 const log = createSubsystemLogger("outbound/deliver");
@@ -27,13 +28,18 @@ export async function mirrorDeliveredPayloads(params: {
       .map((payload) => payload.hookContent ?? resolveOutboundPayloadMirrorText(payload))
       .filter((text) => text.trim())
       .join("\n"),
-    mediaUrls: params.payloads.flatMap((payload) => payload.mediaUrls),
+    mediaUrls: params.payloads.flatMap((payload) =>
+      transcriptMediaForSession(payload, mirror.sessionKey).length ? [] : payload.mediaUrls,
+    ),
+    media: params.payloads.flatMap((payload) =>
+      transcriptMediaForSession(payload, mirror.sessionKey),
+    ),
   };
   const mirrorText = resolveMirroredTranscriptText({
     text: deliveredMirror.text,
     mediaUrls: deliveredMirror.mediaUrls,
   });
-  if (!mirrorText) {
+  if (!mirrorText && deliveredMirror.media.length === 0) {
     return;
   }
   // Transcript mirroring is best-effort bookkeeping after platform send.
@@ -51,7 +57,8 @@ export async function mirrorDeliveredPayloads(params: {
         ? { expectedLifecycleRevision: writerFence.expectedLifecycleRevision }
         : {}),
       ...(writerFence ? { expectedWriterRunId: writerFence.expectedWriterRunId } : {}),
-      text: mirrorText,
+      text: mirrorText ?? undefined,
+      ...(deliveredMirror.media.length ? { media: deliveredMirror.media } : {}),
       idempotencyKey: mirror.idempotencyKey,
       deliveryMirror: mirror.deliveryMirror,
       config: params.delivery.cfg,

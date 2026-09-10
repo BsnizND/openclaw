@@ -50,6 +50,13 @@ type DurableFinalDeliveryPayloadShape = {
   mediaUrls?: readonly (string | null | undefined)[] | null;
 };
 
+/** Native image asset supplied after a successful send addressed by an OpenClaw session key. */
+export type ChannelMessageTranscriptMedia = {
+  path: string;
+  contentType: string;
+  kind: "image";
+};
+
 /** Raw platform result shape normalized into a message receipt. */
 export type MessageReceiptSourceResult = {
   /** Provider-confirmed intentional omission before dispatch, never an ambiguous send. */
@@ -67,7 +74,10 @@ export type MessageReceiptSourceResult = {
   toJid?: string;
   pollId?: string;
   timestamp?: number;
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> & {
+    /** Complete ordered all-image payload for a session-key-addressed native transport. */
+    transcriptMedia?: readonly ChannelMessageTranscriptMedia[];
+  };
 };
 
 /** Logical part kind for multi-part rendered messages. */
@@ -191,6 +201,8 @@ export type ChannelMessageSendTextContext<TConfig = OpenClawConfig> = {
   gatewayClientScopes?: readonly string[];
   /** @internal Opaque durable intent id for exact provider-side send reconciliation. */
   deliveryQueueId?: string;
+  /** Opaque identity for this queued platform send; stable on native queue replay, not proof of delivery. */
+  deliveryOperationId?: string;
   /** @internal Stable platform-send index within one durable payload. */
   deliveryPartIndex?: number;
   /** @internal Exact platform-send count within one durable payload. */

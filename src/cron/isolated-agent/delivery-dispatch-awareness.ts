@@ -10,14 +10,20 @@ import {
 import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-mirror.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { transcriptMediaForSession } from "../../infra/outbound/deliver-transcript-media.js";
 import type { NormalizedOutboundPayload } from "../../infra/outbound/deliver.js";
 import type { OutboundSessionRoute } from "../../infra/outbound/outbound-session.js";
+import {
+  createOutboundPayloadPlan,
+  projectOutboundPayloadPlanForMirror,
+} from "../../infra/outbound/payloads.js";
 import type {
   SourceDeliveryOutcome,
   SourceDeliveryVisibleDelivery,
 } from "../../infra/outbound/source-delivery-plan.js";
 import { withSystemEventOwner } from "../../infra/system-event-ownership.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
+import type { MediaFact } from "../../media/media-facts.js";
 import { parseThreadSessionSuffix } from "../../routing/session-key.js";
 import { beginSessionWorkAdmission } from "../../sessions/session-lifecycle-admission.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
@@ -43,6 +49,7 @@ export type DirectCronTranscriptMirror = {
   expectedLifecycleRevision?: string;
   text?: string;
   mediaUrls?: string[];
+  media?: readonly MediaFact[];
   storePath?: string;
   idempotencyKey: string;
   deliveryMirror?: { kind: typeof CRON_DIRECT_DELIVERY_CONTEXT_KIND };
@@ -269,15 +276,47 @@ function isTtsAudioMirrorOnly(params: {
   );
 }
 
+export function projectDirectCronDeliveryForMirror(params: {
+  deliveredPayloads: NormalizedOutboundPayload[];
+  attemptedPayloads: NormalizedOutboundPayload[];
+  fallbackPayloads: ReplyPayload[];
+  cfg: OpenClawConfig;
+  sessionKey: string;
+  surface: string;
+}): ReturnType<typeof projectDeliveredDirectCronPayloadsForMirror> {
+  const payloads = params.deliveredPayloads.length
+    ? params.deliveredPayloads
+    : params.attemptedPayloads;
+  return payloads.length
+    ? projectDeliveredDirectCronPayloadsForMirror(payloads, params.sessionKey)
+    : projectOutboundPayloadPlanForMirror(
+        createOutboundPayloadPlan(
+          buildDirectCronTranscriptMirrorPayloads(params.fallbackPayloads),
+          {
+            cfg: params.cfg,
+            sessionKey: params.sessionKey,
+            surface: params.surface,
+          },
+        ),
+      );
+}
+
 export function projectDeliveredDirectCronPayloadsForMirror(
   payloads: readonly NormalizedOutboundPayload[],
-): { text?: string; mediaUrls: string[] } {
+  sessionKey?: string,
+): { text?: string; mediaUrls: string[]; media?: MediaFact[] } {
   const textParts: string[] = [];
   const mediaUrls: string[] = [];
+  const media: MediaFact[] = [];
   for (const payload of payloads) {
     const text = pickDirectCronMirrorPayloadText(payload);
     if (text) {
       textParts.push(text);
+    }
+    const transcriptMedia = transcriptMediaForSession(payload, sessionKey);
+    if (transcriptMedia.length) {
+      media.push(...transcriptMedia);
+      continue;
     }
     for (const mediaUrl of payload.mediaUrls) {
       if (isTtsAudioMirrorOnly({ payload, mediaUrl })) {
@@ -289,6 +328,7 @@ export function projectDeliveredDirectCronPayloadsForMirror(
   return {
     text: textParts.join("\n"),
     mediaUrls,
+    ...(media.length ? { media } : {}),
   };
 }
 
@@ -571,7 +611,7 @@ async function appendDirectCronDeliveryTranscriptMirror(params: {
   job: CronJob;
   mirror: DirectCronTranscriptMirror;
 }): Promise<void> {
-  if (!params.mirror.text && !params.mirror.mediaUrls?.length) {
+  if (!params.mirror.text && !params.mirror.mediaUrls?.length && !params.mirror.media?.length) {
     return;
   }
   try {

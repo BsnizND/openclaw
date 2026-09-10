@@ -177,6 +177,7 @@ export async function deliverOutboundPayloadsWithQueueCleanup(
   };
   const wrappedParams: DeliverOutboundPayloadsParams = {
     ...params,
+    deliveryOperationIntentId: platformQueueId,
     // A provider marker can represent the whole durable intent only when one payload owns it.
     // Adapters must narrow further when one payload can fan out into multiple platform sends.
     ...(exactReconciliationRequired && params.payloads.length === 1

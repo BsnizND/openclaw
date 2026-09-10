@@ -4,6 +4,7 @@ import type { AgentMessage } from "../../agents/runtime/index.js";
 import type { SessionManager } from "../../agents/sessions/session-manager.js";
 import { redactTranscriptMessage } from "../../agents/transcript-redact.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { readPersistedMediaFacts, type MediaFact } from "../../media/media-facts.js";
 import {
   normalizeAgentId,
   parseAgentSessionKey,
@@ -403,6 +404,8 @@ export async function appendAssistantMessageToSessionTranscript(params: {
   sessionLifecyclePatch?: SessionTranscriptTurnLifecyclePatch;
   text?: string;
   mediaUrls?: string[];
+  /** Canonical persisted attachment facts already validated by their native owner. */
+  media?: readonly MediaFact[];
   content?: SessionTranscriptAssistantMessage["content"];
   displayContent?: Array<Record<string, unknown>>;
   eventId?: string;
@@ -430,7 +433,7 @@ export async function appendAssistantMessageToSessionTranscript(params: {
   const content =
     params.content ?? (mirrorText ? [{ type: "text" as const, text: mirrorText }] : []);
   const displayContent = params.displayContent?.map((block) => Object.assign({}, block));
-  if (content.length === 0 && !displayContent?.length) {
+  if (content.length === 0 && !displayContent?.length && !params.media?.length) {
     return { ok: false, reason: "empty text" };
   }
 
@@ -457,6 +460,9 @@ export async function appendAssistantMessageToSessionTranscript(params: {
     message: {
       role: "assistant" as const,
       content,
+      ...(params.media?.length
+        ? { __openclaw: { media: params.media.map((fact) => ({ ...fact })) } }
+        : {}),
       ...(displayContent ? { [ASSISTANT_DISPLAY_CONTENT_FIELD]: displayContent } : {}),
       api: OPENCLAW_TRANSCRIPT_ARTIFACT_API,
       provider: OPENCLAW_TRANSCRIPT_ARTIFACT_PROVIDER,
@@ -582,7 +588,9 @@ export async function appendExactAssistantMessageToSessionTranscript(params: {
       };
     }
     const identifiedDeliveryMirror =
-      Boolean(explicitIdempotencyKey) && isIdentifiedDeliveryMirror(params.message);
+      Boolean(explicitIdempotencyKey) &&
+      (isIdentifiedDeliveryMirror(params.message) ||
+        Boolean(readPersistedMediaFacts(params.message)?.length));
     const target: SessionTranscriptAppendTarget = {
       ...(transcriptAgentId ? { agentId: transcriptAgentId } : {}),
       sessionId: currentEntry.sessionId,
@@ -596,7 +604,7 @@ export async function appendExactAssistantMessageToSessionTranscript(params: {
     }
     let latestEquivalentAssistantId: string | undefined;
     // Identified delivery mirrors, including suppressed finals, dedupe only by
-    // key so same-text markers from different source ids remain separate rows.
+    // key so same-text markers and images from different source ids remain separate rows.
     const turn = await persistSessionTranscriptTurn(
       {
         sessionId: currentEntry.sessionId,

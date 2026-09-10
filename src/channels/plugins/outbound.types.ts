@@ -45,6 +45,8 @@ export type ChannelOutboundContext = {
   gatewayClientScopes?: readonly string[];
   /** @internal Opaque durable intent id for exact provider-side send reconciliation. */
   deliveryQueueId?: string;
+  /** Opaque identity for this queued platform send; stable on native queue replay, not proof of delivery. */
+  deliveryOperationId?: string;
   /** @internal Stable platform-send index within one durable payload. */
   deliveryPartIndex?: number;
   /** @internal Exact platform-send count within one durable payload. */

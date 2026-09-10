@@ -202,6 +202,8 @@ export type DeliverOutboundPayloadsCoreParams = {
   onPlatformSendStart?: (route: PlatformSendRoute, sourceIndex?: number) => Promise<void>;
   /** @internal Opaque durable intent id forwarded to provider reconciliation hooks. */
   deliveryQueueId?: string;
+  /** @internal Existing queue identity used only to derive per-platform-send correlation. */
+  deliveryOperationIntentId?: string;
   /** @internal Stable producer id used to make queue creation idempotent across crashes. */
   deliveryIntentId?: string;
   /** @internal Retain the completed receipt for a producer-owned replayable intent. */

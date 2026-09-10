@@ -8,10 +8,6 @@ import type {
   NormalizedOutboundPayload,
   OutboundDeliveryResult,
 } from "../../infra/outbound/deliver.js";
-import {
-  createOutboundPayloadPlan,
-  projectOutboundPayloadPlanForMirror,
-} from "../../infra/outbound/payloads.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import { isCronSessionKey } from "../../routing/session-key.js";
@@ -23,10 +19,9 @@ import type { CronResolvedDeliveryState } from "../types.js";
 import { commitCurrentSessionCronCompletion } from "./current-session-completion.js";
 import {
   appendAdmittedDirectCronDeliveryTranscriptMirror,
-  buildDirectCronTranscriptMirrorPayloads,
   type DirectCronTranscriptMirror,
   formatTargetCronDeliveryFailureAwarenessText,
-  projectDeliveredDirectCronPayloadsForMirror,
+  projectDirectCronDeliveryForMirror,
   queueCronAwarenessSystemEvent,
   queueCronMessageToolDeliveryAwareness,
   resolveCronAwarenessMainSessionKey,
@@ -350,6 +345,7 @@ export async function dispatchCronDelivery(
       // `onPayload` fires after send hooks render the outbound payload, but before
       // platform send. The mirror only consumes this array after full delivery succeeds.
       const attemptedPayloadsForMirror: NormalizedOutboundPayload[] = [];
+      const deliveredPayloadsForMirror: NormalizedOutboundPayload[] = [];
       const onError = params.deliveryBestEffort
         ? (err: unknown, _payload: unknown) => {
             logCronDeliveryErrorDeferred(
@@ -359,6 +355,7 @@ export async function dispatchCronDelivery(
         : undefined;
       const runDelivery = async () => {
         attemptedPayloadsForMirror.length = 0;
+        deliveredPayloadsForMirror.length = 0;
         const send = await sendDurableMessageBatchCore({
           cfg: params.cfgWithAgentDefaults,
           channel: delivery.channel,
@@ -378,6 +375,9 @@ export async function dispatchCronDelivery(
           onError,
           onPayload: (payload) => {
             attemptedPayloadsForMirror.push(payload);
+          },
+          onDeliveredPayload: (payload) => {
+            deliveredPayloadsForMirror.push(payload);
           },
           onDeliveryResult: () => {
             // Early commit: persist the route as soon as the first platform
@@ -528,19 +528,14 @@ export async function dispatchCronDelivery(
         !deliveryWillReachAwarenessMainSession &&
         !mirrorWouldBypassIsolatedAwarenessPolicy
       ) {
-        const mirrorProjection =
-          attemptedPayloadsForMirror.length > 0
-            ? projectDeliveredDirectCronPayloadsForMirror(attemptedPayloadsForMirror)
-            : projectOutboundPayloadPlanForMirror(
-                createOutboundPayloadPlan(
-                  buildDirectCronTranscriptMirrorPayloads(linkedPayloadsForDelivery),
-                  {
-                    cfg: params.cfgWithAgentDefaults,
-                    sessionKey: deliverySessionKey,
-                    surface: delivery.channel,
-                  },
-                ),
-              );
+        const mirrorProjection = projectDirectCronDeliveryForMirror({
+          deliveredPayloads: deliveredPayloadsForMirror,
+          attemptedPayloads: attemptedPayloadsForMirror,
+          fallbackPayloads: linkedPayloadsForDelivery,
+          cfg: params.cfgWithAgentDefaults,
+          sessionKey: deliverySessionKey,
+          surface: delivery.channel,
+        });
         const mirrorText = resolveDirectCronTranscriptMirrorText(mirrorProjection);
         const transcriptMirror = {
           sessionKey: deliverySessionKey,
@@ -552,6 +547,7 @@ export async function dispatchCronDelivery(
               }
             : {}),
           text: mirrorText,
+          ...(mirrorProjection.media?.length ? { media: mirrorProjection.media } : {}),
           // Keep cron delivery mirrors text-first: non-audio attachment names
           // are folded into mirrorText so media does not replace delivered text.
           mediaUrls: undefined,

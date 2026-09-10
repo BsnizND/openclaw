@@ -5,6 +5,7 @@ import { renderPresentationForDelivery } from "../../channels/plugins/outbound/p
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { getOrCreatePromise } from "../../shared/lazy-promise.js";
+import { sha256Base64Url } from "../crypto-digest.js";
 import { diagnosticErrorCategory } from "../diagnostic-error-metadata.js";
 import {
   emitInternalDiagnosticEvent as emitDiagnosticEvent,
@@ -25,6 +26,7 @@ import {
   stripInternalRuntimeScaffoldingFromPayload,
 } from "./deliver-payload.js";
 import { createDeliveryResultRecorder } from "./deliver-results.js";
+import { resolveDeliveredTranscriptMedia } from "./deliver-transcript-media.js";
 import { mirrorDeliveredPayloads } from "./deliver-transcript.js";
 import type {
   OutboundDeliveryResult,
@@ -117,10 +119,22 @@ export async function deliverOutboundPayloadsCore(
       preparedTarget = { ...preparedTarget, threadId: adoptedTarget.threadId };
     }
   };
-  const withPreparedTarget = <T extends OutboundMessageSendOverrides>(overrides: T): T =>
-    preparedTarget.threadId == null
-      ? overrides
-      : { ...overrides, threadId: preparedTarget.threadId };
+  const withPreparedTarget = <T extends OutboundMessageSendOverrides>(overrides: T): T => ({
+    ...overrides,
+    ...(preparedTarget.threadId == null ? {} : { threadId: preparedTarget.threadId }),
+    // Correlation survives native replay without claiming whether an unknown send succeeded.
+    // Source indexes come from the persisted prepared batch, including suppressed siblings.
+    deliveryOperationId:
+      params.deliveryOperationIntentId && activeSourceIndex !== undefined
+        ? `outbound-send:v1:${sha256Base64Url(
+            JSON.stringify([
+              params.deliveryOperationIntentId,
+              activeSourceIndex,
+              overrides.deliveryPartIndex ?? 0,
+            ]),
+          )}`
+        : undefined,
+  });
   const adoptSuccessfulResultsSince = (resultIndex: number): void => {
     for (const result of results.slice(resultIndex)) {
       maybeAdoptTargetFromDelivery(result);
@@ -202,17 +216,26 @@ export async function deliverOutboundPayloadsCore(
     params.onPayloadDeliveryOutcome?.(outcome);
   }
   const deliveredMirrorPayloads: NormalizedOutboundPayload[] = [];
-  const recordDeliveredPayload = (
+  const recordDeliveredPayload = async (
     payloadSummary: NormalizedOutboundPayload,
     deliveredResults: readonly OutboundDeliveryResult[],
-  ): void => {
+  ): Promise<void> => {
     if (deliveredResults.length === 0) {
       return;
     }
+    const transcriptMedia = await resolveDeliveredTranscriptMedia({
+      payload: payloadSummary,
+      results: deliveredResults,
+      channel,
+      to,
+    });
+    const mirroredPayload = transcriptMedia
+      ? { ...payloadSummary, transcriptMedia }
+      : payloadSummary;
     // Post-send observers are bookkeeping only. Never turn an identified
     // platform delivery into a retryable failure if an observer misbehaves.
     try {
-      params.onDeliveredPayload?.(payloadSummary);
+      params.onDeliveredPayload?.(mirroredPayload);
     } catch (error) {
       log.warn("Outbound delivered-payload observer failed after platform send.", {
         channel,
@@ -221,7 +244,7 @@ export async function deliverOutboundPayloadsCore(
       });
     }
     if (params.mirror) {
-      deliveredMirrorPayloads.push(payloadSummary);
+      deliveredMirrorPayloads.push(mirroredPayload);
     }
   };
   // `policyKey` is a diagnostics-only fallback; never use it for hook correlation.
@@ -454,7 +477,7 @@ export async function deliverOutboundPayloadsCore(
           status: "sent",
           results: deliveredResults,
         });
-        recordDeliveredPayload(mirroredPayload, deliveredResults);
+        await recordDeliveredPayload(mirroredPayload, deliveredResults);
       } else {
         recordPayloadOutcome(
           suppressedPayloadOutcome({

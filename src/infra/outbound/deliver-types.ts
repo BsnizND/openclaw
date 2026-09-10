@@ -20,11 +20,12 @@ export type OutboundDeliveryResult = {
     id: string;
   };
   timestamp?: number;
+  conversationId?: string;
   toJid?: string;
   pollId?: string;
   receipt?: MessageReceipt;
   // Channel docking: stash channel-specific fields here to avoid core type churn.
-  meta?: Record<string, unknown>;
+  meta?: MessageReceiptSourceResult["meta"];
 };
 
 /** Count platform sends without double-counting equivalent receipt representations. */
