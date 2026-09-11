@@ -10,6 +10,7 @@ import {
 import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-mirror.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { isTranscriptCommittedForSession } from "../../infra/outbound/deliver-transcript-commit.js";
 import { transcriptMediaForSession } from "../../infra/outbound/deliver-transcript-media.js";
 import type { NormalizedOutboundPayload } from "../../infra/outbound/deliver.js";
 import type { OutboundSessionRoute } from "../../infra/outbound/outbound-session.js";
@@ -309,6 +310,9 @@ export function projectDeliveredDirectCronPayloadsForMirror(
   const mediaUrls: string[] = [];
   const media: MediaFact[] = [];
   for (const payload of payloads) {
+    if (isTranscriptCommittedForSession(payload, sessionKey)) {
+      continue;
+    }
     const text = pickDirectCronMirrorPayloadText(payload);
     if (text) {
       textParts.push(text);

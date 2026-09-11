@@ -151,6 +151,7 @@ export type ChannelHandlerParams = {
   gifPlayback?: boolean;
   forceDocument?: boolean;
   silent?: boolean;
+  nativeMediaOnly?: boolean;
   abortSignal?: AbortSignal;
   mediaAccess?: OutboundMediaAccess;
   gatewayClientScopes?: readonly string[];

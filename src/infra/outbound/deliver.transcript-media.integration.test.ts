@@ -6,7 +6,6 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 import { replaceSessionEntrySync } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import { useTempSessionsFixture } from "../../config/sessions/test-helpers.js";
-import { appendAssistantMessageToSessionTranscript } from "../../config/sessions/transcript.js";
 import {
   appendAdmittedDirectCronDeliveryTranscriptMirror,
   projectDeliveredDirectCronPayloadsForMirror,
@@ -22,7 +21,10 @@ import { listManagedImageRecordEntries } from "../../gateway/managed-image-recor
 import { readPersistedMediaFacts } from "../../media/media-facts.js";
 import type { MediaFact } from "../../media/media-facts.js";
 import { saveMediaBuffer } from "../../media/store.js";
-import { readVisibleSessionTranscriptMessageEntries } from "../../plugin-sdk/session-transcript-runtime.js";
+import {
+  appendAssistantMessageToSessionTranscript,
+  readVisibleSessionTranscriptMessageEntries,
+} from "../../plugin-sdk/session-transcript-runtime.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { readSessionTranscriptRunId } from "../../sessions/transcript-events.js";
@@ -51,6 +53,9 @@ describe("native outbound transcript image projection", () => {
   let rejectBeforeDispatchForMedia: string | undefined;
   let mediaAttempts: ChannelOutboundContext[];
   let failMedia = false;
+  let persistBeforeNotify = false;
+  let receiptMessageIdOverride: string | undefined;
+  let receiptSessionIdOverride: string | undefined;
   let transportSawMessageCount = -1;
 
   const scope = () => ({ agentId: "main", sessionId, sessionKey, storePath: fixture.storePath() });
@@ -89,12 +94,51 @@ describe("native outbound transcript image projection", () => {
     rejectBeforeDispatchForMedia = undefined;
     mediaAttempts = [];
     failMedia = false;
+    persistBeforeNotify = false;
+    receiptMessageIdOverride = undefined;
+    receiptSessionIdOverride = undefined;
     transportSawMessageCount = -1;
-    const sendText = async (ctx: ChannelOutboundContext) => ({
-      channel: "matrix" as const,
-      messageId: ctx.deliveryOperationId ?? "text-unkeyed",
-      conversationId: ctx.to,
-    });
+    const sendText = async (ctx: ChannelOutboundContext) => {
+      let committedMessageId: string | undefined;
+      if (persistBeforeNotify) {
+        const committed = await appendAssistantMessageToSessionTranscript({
+          ...scope(),
+          expectedSessionId: sessionId,
+          text: ctx.nativeMediaOnly ? undefined : ctx.text,
+          ...(ctx.mediaUrl
+            ? { media: [{ path: imagePath, contentType: "image/png", kind: "image" as const }] }
+            : {}),
+          idempotencyKey: ctx.deliveryOperationId,
+          ...(ctx.deliveryOperationId
+            ? {
+                deliveryMirror: {
+                  kind: "channel-final" as const,
+                  sourceMessageId: ctx.deliveryOperationId,
+                },
+              }
+            : {}),
+          config: cfg,
+        });
+        if (!committed.ok) {
+          throw new Error(committed.reason);
+        }
+        committedMessageId = committed.messageId;
+        transportSawMessageCount = (await messages()).length;
+      }
+      return {
+        channel: "matrix" as const,
+        messageId: ctx.deliveryOperationId ?? "text-unkeyed",
+        conversationId: ctx.to,
+        ...(committedMessageId
+          ? {
+              meta: {
+                transcriptMessageId: receiptMessageIdOverride ?? committedMessageId,
+                transcriptSessionId: receiptSessionIdOverride ?? sessionId,
+              },
+            }
+          : {}),
+      };
+    };
     setActivePluginRegistry(
       createTestRegistry([
         {
@@ -118,14 +162,18 @@ describe("native outbound transcript image projection", () => {
                 if (failMedia) {
                   throw new Error("fixture transport rejected image");
                 }
+                const sent = await sendText(ctx);
                 return {
-                  ...(await sendText(ctx)),
+                  ...sent,
                   conversationId: receiptConversation,
                   ...(ctx.mediaUrl === mediaWithoutImageFacts
                     ? {}
                     : {
                         // This fixture deliberately crosses the untyped plugin runtime boundary.
-                        meta: { transcriptMedia: receiptMedia } as Record<string, unknown>,
+                        meta: { ...sent.meta, transcriptMedia: receiptMedia } as Record<
+                          string,
+                          unknown
+                        >,
                       }),
                 };
               },
@@ -152,6 +200,163 @@ describe("native outbound transcript image projection", () => {
       mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId, idempotencyKey },
       queuePolicy: "required",
     });
+
+  it("commits before notification and skips both mirrors without repeating the harness caption", async () => {
+    persistBeforeNotify = true;
+    await appendAssistantMessageToSessionTranscript({
+      ...scope(),
+      text: "Harness caption",
+      config: cfg,
+    });
+    const delivered: NormalizedOutboundPayload[] = [];
+    await deliverOutboundPayloads({
+      queuePolicy: "disabled",
+      cfg,
+      channel: "matrix",
+      to: sessionKey,
+      payloads: [{ text: "Harness caption", mediaUrl: "https://example.test/photo.png" }],
+      mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId, nativeMediaOnly: true },
+      onDeliveredPayload: (payload) => {
+        delivered.push(payload);
+      },
+    });
+    expect(transportSawMessageCount).toBe(2);
+    expect(mediaAttempts[0]?.nativeMediaOnly).toBe(true);
+    const rows = await messages();
+    expect(rows).toHaveLength(2);
+    expect(rows[1]?.message).toMatchObject({ role: "assistant", content: [] });
+    expect(managedRecords()).toMatchObject([
+      { record: { messageId: rows[1]?.entryId, retentionClass: "history" } },
+    ]);
+    const projection = projectDeliveredDirectCronPayloadsForMirror(delivered, sessionKey);
+    expect(projection).toEqual({ text: "", mediaUrls: [] });
+    await appendAdmittedDirectCronDeliveryTranscriptMirror({
+      job: { id: "committed-fixture" } as CronJob,
+      mirror: {
+        ...scope(),
+        expectedSessionId: sessionId,
+        text: resolveDirectCronTranscriptMirrorText(projection),
+        media: projection.media,
+        idempotencyKey: "cron-committed",
+        config: cfg,
+      },
+    });
+    expect(await messages()).toHaveLength(2);
+    expect(projectDeliveredDirectCronPayloadsForMirror(delivered, "agent:main:other")).toEqual({
+      text: "Harness caption",
+      mediaUrls: ["https://example.test/photo.png"],
+    });
+  });
+
+  it("keeps distinct committed text and media parts without a duplicate generic mirror", async () => {
+    persistBeforeNotify = true;
+    const delivered: NormalizedOutboundPayload[] = [];
+    await deliverOutboundPayloads({
+      queuePolicy: "disabled",
+      cfg,
+      channel: "matrix",
+      to: sessionKey,
+      payloads: [
+        { text: "Native text" },
+        {
+          text: "Two images",
+          mediaUrls: ["https://example.test/one.png", "https://example.test/two.png"],
+        },
+      ],
+      mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId },
+      onDeliveredPayload: (payload) => {
+        delivered.push(payload);
+      },
+    });
+    const rows = await messages();
+    expect(rows).toHaveLength(3);
+    expect(delivered.map((payload) => payload.transcriptCommit?.messageIds.length)).toEqual([1, 2]);
+    expect(new Set(rows.map((row) => row.entryId)).size).toBe(3);
+  });
+
+  it("preserves identical text from independent operations and replays the original ID after intervening content", async () => {
+    persistBeforeNotify = true;
+    const send = (intent: string, text: string) =>
+      deliverOutboundPayloadsCore({
+        cfg,
+        channel: "matrix",
+        to: sessionKey,
+        payloads: [{ text }],
+        preparedBatch: createUnmodifiedPreparedOutboundBatch([{ text }]),
+        deliveryOperationIntentId: intent,
+        mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId },
+      });
+    const first = await send("text-operation-one", "Same text");
+    const second = await send("text-operation-two", "Same text");
+    const intervening = await send("text-operation-three", "Intervening text");
+    const replay = await send("text-operation-one", "Same text");
+    const rows = await messages();
+    expect(rows).toHaveLength(3);
+    expect(first[0]?.meta?.transcriptMessageId).not.toBe(second[0]?.meta?.transcriptMessageId);
+    expect(replay[0]?.meta?.transcriptMessageId).toBe(first[0]?.meta?.transcriptMessageId);
+    expect(rows.at(-1)?.entryId).toBe(intervening[0]?.meta?.transcriptMessageId);
+  });
+
+  it.each(["missing message", "different instance", "foreign conversation"])(
+    "retains mirror fallback for a receipt with %s",
+    async (defect) => {
+      persistBeforeNotify = true;
+      if (defect === "missing message") {
+        receiptMessageIdOverride = "not-committed";
+      }
+      if (defect === "different instance") {
+        receiptSessionIdOverride = "old-session-instance";
+      }
+      if (defect === "foreign conversation") {
+        receiptConversation = "agent:main:other";
+      }
+      const delivered: NormalizedOutboundPayload[] = [];
+      await deliverOutboundPayloads({
+        queuePolicy: "disabled",
+        cfg,
+        channel: "matrix",
+        to: sessionKey,
+        payloads: [{ text: "Persisted image", mediaUrl: "https://example.test/photo.png" }],
+        mirror: {
+          agentId: "main",
+          sessionKey,
+          expectedSessionId: sessionId,
+          idempotencyKey: "fallback-mirror",
+        },
+        onDeliveredPayload: (payload) => {
+          delivered.push(payload);
+        },
+      });
+      expect(delivered[0]?.transcriptCommit).toBeUndefined();
+      expect(await messages()).toHaveLength(2);
+    },
+  );
+
+  it("retains a committed first part without claiming a failed multi-part payload is complete", async () => {
+    persistBeforeNotify = true;
+    rejectBeforeDispatchForMedia = "https://example.test/second.png";
+    const delivered: NormalizedOutboundPayload[] = [];
+    const results = await deliverOutboundPayloads({
+      queuePolicy: "disabled",
+      cfg,
+      channel: "matrix",
+      to: sessionKey,
+      payloads: [
+        {
+          text: "Two images",
+          mediaUrls: ["https://example.test/first.png", rejectBeforeDispatchForMedia],
+        },
+      ],
+      bestEffort: true,
+      mirror: { agentId: "main", sessionKey, expectedSessionId: sessionId },
+      onDeliveredPayload: (payload) => {
+        delivered.push(payload);
+      },
+    });
+    expect(results).toHaveLength(1);
+    expect(await messages()).toHaveLength(1);
+    expect(delivered).toEqual([]);
+  });
 
   it("persists a generated command image after native delivery without duplicating its existing caption", async () => {
     const caption = "Here is the generated image";

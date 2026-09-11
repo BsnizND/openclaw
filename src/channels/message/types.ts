@@ -77,6 +77,10 @@ export type MessageReceiptSourceResult = {
   meta?: Record<string, unknown> & {
     /** Complete ordered all-image payload for a session-key-addressed native transport. */
     transcriptMedia?: readonly ChannelMessageTranscriptMedia[];
+    /** Already committed native assistant entry covering this entire result. */
+    transcriptMessageId?: string;
+    /** Exact transcript instance; conversationId must be its persisted session key. */
+    transcriptSessionId?: string;
   };
 };
 

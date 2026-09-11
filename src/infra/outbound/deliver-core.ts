@@ -26,6 +26,7 @@ import {
   stripInternalRuntimeScaffoldingFromPayload,
 } from "./deliver-payload.js";
 import { createDeliveryResultRecorder } from "./deliver-results.js";
+import { resolveDeliveredTranscriptCommit } from "./deliver-transcript-commit.js";
 import { resolveDeliveredTranscriptMedia } from "./deliver-transcript-media.js";
 import { mirrorDeliveredPayloads } from "./deliver-transcript.js";
 import type {
@@ -90,6 +91,7 @@ export async function deliverOutboundPayloadsCore(
       gifPlayback: params.gifPlayback,
       forceDocument: params.forceDocument,
       silent: params.silent,
+      nativeMediaOnly: params.mirror?.nativeMediaOnly,
       abortSignal,
       mediaAccess: resolveMediaAccess(mediaSources),
       gatewayClientScopes: params.gatewayClientScopes,
@@ -231,9 +233,17 @@ export async function deliverOutboundPayloadsCore(
       channel,
       to,
     });
-    const mirroredPayload = transcriptMedia
-      ? { ...payloadSummary, transcriptMedia }
-      : payloadSummary;
+    const transcriptCommit = await resolveDeliveredTranscriptCommit({
+      cfg,
+      results: deliveredResults,
+      channel,
+      to,
+    });
+    const mirroredPayload = {
+      ...payloadSummary,
+      ...(transcriptMedia ? { transcriptMedia } : {}),
+      ...(transcriptCommit ? { transcriptCommit } : {}),
+    };
     // Post-send observers are bookkeeping only. Never turn an identified
     // platform delivery into a retryable failure if an observer misbehaves.
     try {

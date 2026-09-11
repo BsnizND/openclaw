@@ -541,6 +541,7 @@ const createChannelOutboundContextBase = (params: ChannelHandlerParams) => ({
   forceDocument: params.forceDocument,
   deps: params.deps,
   silent: params.silent,
+  nativeMediaOnly: params.nativeMediaOnly,
   signal: params.abortSignal,
   abortSignal: params.abortSignal,
   mediaAccess: params.mediaAccess,

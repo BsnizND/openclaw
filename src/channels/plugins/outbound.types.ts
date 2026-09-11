@@ -40,6 +40,8 @@ export type ChannelOutboundContext = {
   identity?: OutboundIdentity;
   deps?: OutboundSendDeps;
   silent?: boolean;
+  /** Persist only native media when the originating harness already owns the caption. */
+  nativeMediaOnly?: boolean;
   /** Live cancellation signal; check before each physical send and after awaited preparation. */
   signal?: AbortSignal;
   gatewayClientScopes?: readonly string[];

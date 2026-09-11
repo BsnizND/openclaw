@@ -57,6 +57,8 @@ export type {
   TranscriptEntryAnchor,
   TranscriptTurnAdmission,
 } from "../config/sessions/session-accessor.js";
+export { readPreferredUpstreamUserText } from "../config/sessions/transcript-recent-window.js";
+export { appendAssistantMessageToSessionTranscript } from "../config/sessions/transcript.js";
 export { hasPromptImageInput } from "../media/prompt-image-input.js";
 
 export {
