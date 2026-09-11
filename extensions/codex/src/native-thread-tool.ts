@@ -9,6 +9,10 @@ import {
   asOptionalRecord,
   asSafeIntegerInRange,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS,
+  estimateToolResultTextChars,
+} from "openclaw/plugin-sdk/text-utility-runtime";
 import { jsonResult } from "openclaw/plugin-sdk/tool-results";
 import { Type } from "typebox";
 import { CODEX_CONTROL_METHODS } from "./app-server/capabilities.js";
@@ -42,6 +46,15 @@ const ReadParamsSchema = Type.Object(
     action: Type.Literal("read"),
     thread_id: Type.String(),
     include_turns: Type.Optional(Type.Boolean()),
+    item_limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 50,
+        description:
+          "Read complete native items newest first, bounded to 16000 weighted characters per page. Requires include_turns=true and native item-pagination support. Continue with the returned cursor.",
+      }),
+    ),
+    cursor: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 );
@@ -318,6 +331,84 @@ export function createCodexThreadsTool(options: CodexThreadsToolOptions): AnyAge
             throw new Error(
               "Codex raw transcript reads are disabled for this codex plugin supervision config.",
             );
+          }
+          if (params.item_limit !== undefined || params.cursor !== undefined) {
+            if (!includeTurns) {
+              throw new Error("Codex item pagination requires include_turns=true.");
+            }
+            const itemLimit = asSafeIntegerInRange(params.item_limit, { min: 1, max: 50 });
+            if (params.item_limit !== undefined && itemLimit === undefined) {
+              throw new Error("Codex item_limit must be an integer from 1 to 50.");
+            }
+            const cursor = params.cursor;
+            if (cursor !== undefined && (typeof cursor !== "string" || !cursor.trim())) {
+              throw new Error("Codex cursor must be a nonempty native continuation cursor.");
+            }
+            const { sanitizeToolResult } =
+              await import("openclaw/plugin-sdk/agent-harness-runtime");
+            let limit = itemLimit ?? 10;
+            for (;;) {
+              const page: unknown = await request(
+                admissionConfig,
+                CODEX_CONTROL_METHODS.listThreadItems,
+                { threadId, limit, sortDirection: "desc", ...(cursor ? { cursor } : {}) },
+                requestOptions(admissionConfig),
+              ).catch(() => {
+                // Native invalid-cursor errors echo the supplied cursor. The bridge
+                // includes causes in unbudgeted error text, so return a bounded failure.
+                throw new Error(
+                  "Native Codex item paging failed. No items were returned; verify the task and native item-pagination support before retrying the same cursor.",
+                );
+              });
+              if (
+                !isJsonObject(page) ||
+                !Array.isArray(page.data) ||
+                page.data.length > limit ||
+                !page.data.every(
+                  (entry) =>
+                    isJsonObject(entry) &&
+                    typeof entry.turnId === "string" &&
+                    Boolean(entry.turnId) &&
+                    isJsonObject(entry.item) &&
+                    typeof entry.item.id === "string" &&
+                    Boolean(entry.item.id) &&
+                    typeof entry.item.type === "string",
+                ) ||
+                (page.nextCursor !== undefined &&
+                  page.nextCursor !== null &&
+                  (typeof page.nextCursor !== "string" ||
+                    !page.nextCursor.trim() ||
+                    page.nextCursor === cursor))
+              ) {
+                throw new Error("Codex app-server returned an invalid native item page.");
+              }
+              const payload = {
+                threadId,
+                items: page.data,
+                nextCursor: page.nextCursor ?? null,
+                order: "newest_first",
+              };
+              // jsonResult pretty-prints the payload; the dynamic bridge sanitizes that
+              // text before budgeting it. Count both complete forms, including the cursor.
+              // Tool context lacks the current model's effective budget, so use the SDK
+              // default rather than guessing from stale session accounting or model ids.
+              const text = JSON.stringify(payload, null, 2);
+              if (
+                estimateToolResultTextChars(text) <= DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS &&
+                estimateToolResultTextChars(sanitizeToolResult(text)) <=
+                  DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS
+              ) {
+                return jsonResult(payload);
+              }
+              if (page.data.length <= 1) {
+                throw new Error(
+                  "A complete Codex item or its continuation metadata exceeds the safe page size. No items were returned and the cursor was not advanced; inspect this content in Codex.",
+                );
+              }
+              // Re-read the same opaque anchor with fewer items. Slicing the response
+              // while keeping its native nextCursor would silently skip omitted history.
+              limit = Math.max(1, Math.floor(page.data.length / 2));
+            }
           }
           const response = await request(
             admissionConfig,
