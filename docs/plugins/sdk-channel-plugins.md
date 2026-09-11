@@ -1502,3 +1502,29 @@ surface unless you are maintaining that bundled plugin family directly.
 - [Plugin SDK setup](/plugins/sdk-setup)
 - [Building plugins](/plugins/building-plugins)
 - [Agent harness plugins](/plugins/sdk-agent-harness)
+
+## Native transcript delivery receipts
+
+A transport addressed by an exact OpenClaw session key can persist an assistant
+message before notifying its client. Use
+`appendAssistantMessageToSessionTranscript` from
+`openclaw/plugin-sdk/session-transcript-runtime`, then return that successful
+send's `conversationId` as the exact session key and these `meta` fields:
+
+- `transcriptMessageId`: the committed assistant entry ID returned by the writer.
+- `transcriptSessionId`: the exact session instance used for that commit.
+- `transcriptMedia`: optional existing native image facts for other delivery projections.
+
+Core verifies the current persisted session key and instance, assistant entry ID,
+and active transcript membership through native readers. Every reconciled result
+of a complete logical payload must name its own committed entry. Missing,
+foreign, stale, repeated, or invalid identities preserve ordinary mirroring.
+Only the verified destination's generic and late cron mirrors are skipped;
+other-session awareness and external channels retain their normal projection.
+Partial sends retain their existing delivery accounting and cannot certify the
+whole payload as committed.
+
+`ChannelOutboundContext.nativeMediaOnly` means the originating harness already
+owns the text caption. A native transcript adapter should persist the media
+without adding that caption again. The delivery layer forwards this hint from
+the mirror request; it does not change text sent by external transports.

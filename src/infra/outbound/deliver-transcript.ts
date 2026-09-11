@@ -6,6 +6,7 @@ import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { sha256Base64Url } from "../crypto-digest.js";
 import { formatErrorMessage } from "../errors.js";
 import type { DeliverOutboundPayloadsCoreParams } from "./deliver-contracts.js";
+import { isTranscriptCommittedForSession } from "./deliver-transcript-commit.js";
 import { transcriptMediaForSession } from "./deliver-transcript-media.js";
 import { resolveOutboundPayloadMirrorText, type NormalizedOutboundPayload } from "./payloads.js";
 
@@ -25,21 +26,28 @@ export async function mirrorDeliveredPayloads(params: {
   if (!mirror || params.payloads.length === 0) {
     return;
   }
+  const uncommitted = params.payloads.flatMap((payload, index) =>
+    isTranscriptCommittedForSession(payload, mirror.sessionKey, mirror.expectedSessionId)
+      ? []
+      : [{ payload, sourceIndex: params.sourceIndexes[index] }],
+  );
+  if (uncommitted.length === 0) {
+    return;
+  }
+  const payloads = uncommitted.map(({ payload }) => payload);
   const deliveredMirror = {
     text: mirror.nativeMediaOnly
       ? ""
-      : params.payloads
+      : payloads
           .map((payload) => payload.hookContent ?? resolveOutboundPayloadMirrorText(payload))
           .filter((text) => text.trim())
           .join("\n"),
     mediaUrls: mirror.nativeMediaOnly
       ? []
-      : params.payloads.flatMap((payload) =>
+      : payloads.flatMap((payload) =>
           transcriptMediaForSession(payload, mirror.sessionKey).length ? [] : payload.mediaUrls,
         ),
-    media: params.payloads.flatMap((payload) =>
-      transcriptMediaForSession(payload, mirror.sessionKey),
-    ),
+    media: payloads.flatMap((payload) => transcriptMediaForSession(payload, mirror.sessionKey)),
   };
   const mirrorText = resolveMirroredTranscriptText({
     text: deliveredMirror.text,
@@ -58,7 +66,10 @@ export async function mirrorDeliveredPayloads(params: {
       mirror.idempotencyKey ??
       (deliveredMirror.media.length && params.delivery.deliveryOperationIntentId
         ? `outbound-mirror:v1:${sha256Base64Url(
-            JSON.stringify([params.delivery.deliveryOperationIntentId, params.sourceIndexes]),
+            JSON.stringify([
+              params.delivery.deliveryOperationIntentId,
+              uncommitted.map(({ sourceIndex }) => sourceIndex),
+            ]),
           )}`
         : undefined);
     // Fence against the session this mirror lands in, not whichever run is delivering:
