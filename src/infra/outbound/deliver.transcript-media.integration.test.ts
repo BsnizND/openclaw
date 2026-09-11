@@ -210,7 +210,7 @@ describe("native outbound transcript image projection", () => {
     });
     const delivered: NormalizedOutboundPayload[] = [];
     await deliverOutboundPayloads({
-      queuePolicy: "disabled",
+      queuePolicy: "required",
       cfg,
       channel: "matrix",
       to: sessionKey,
@@ -252,7 +252,7 @@ describe("native outbound transcript image projection", () => {
     persistBeforeNotify = true;
     const delivered: NormalizedOutboundPayload[] = [];
     await deliverOutboundPayloads({
-      queuePolicy: "disabled",
+      queuePolicy: "required",
       cfg,
       channel: "matrix",
       to: sessionKey,
@@ -312,7 +312,7 @@ describe("native outbound transcript image projection", () => {
       }
       const delivered: NormalizedOutboundPayload[] = [];
       await deliverOutboundPayloads({
-        queuePolicy: "disabled",
+        queuePolicy: "required",
         cfg,
         channel: "matrix",
         to: sessionKey,
@@ -337,7 +337,7 @@ describe("native outbound transcript image projection", () => {
     rejectBeforeDispatchForMedia = "https://example.test/second.png";
     const delivered: NormalizedOutboundPayload[] = [];
     const results = await deliverOutboundPayloads({
-      queuePolicy: "disabled",
+      queuePolicy: "required",
       cfg,
       channel: "matrix",
       to: sessionKey,
