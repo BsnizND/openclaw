@@ -624,6 +624,18 @@ read, fork, rename, archive, and unarchive those threads. Fork a thread before
 continuing it in OpenClaw; independent Codex processes do not coordinate
 concurrent writers for the same thread.
 
+For bounded transcript reads, call `codex_threads` with `action: "read"`,
+`thread_id`, `include_turns: true`, and `item_limit` (1–50). This requires native
+item-pagination support. The result contains complete `items` in newest-first
+order and an opaque `nextCursor`; pass that value as `cursor` to read older
+items, stopping when it is `null`. A continuation without `item_limit` requests
+up to 10 items. Pages may contain fewer items to keep the complete raw and
+sanitized JSON within 16,000 weighted characters. If one item or its metadata
+exceeds that bound, the tool fails without returning items or advancing the
+cursor; inspect that content in Codex. Smaller model-context limits can still
+truncate a page. Reads without `item_limit` or `cursor` retain the existing
+metadata/full-transcript behavior.
+
 That `homeScope` opt-in applies to ordinary harness sessions. Hosted web search
 and settled-turn finalization use private temporary homes and OpenClaw auth
 even when ordinary sessions share the user home. A Chat created
