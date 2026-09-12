@@ -593,8 +593,9 @@ export async function startOrResumeThread(
       binding = undefined;
     }
     if (binding?.threadId) {
+      const pluginsEnabled = params.pluginThreadConfig?.enabled ?? false;
       const pluginBindingStale = isCodexPluginThreadBindingStale({
-        codexPluginsEnabled: params.pluginThreadConfig?.enabled ?? false,
+        codexPluginsEnabled: pluginsEnabled,
         bindingFingerprint: binding.pluginAppsFingerprint,
         bindingInputFingerprint: binding.pluginAppsInputFingerprint,
         currentInputFingerprint: params.pluginThreadConfig?.inputFingerprint,
@@ -602,9 +603,7 @@ export async function startOrResumeThread(
       });
       // Supervision cold-resumes with unload, app, and policy checks before committing.
       const canRefreshSupervisedPlugins =
-        binding.connectionScope === "supervision" &&
-        !incognito &&
-        params.pluginThreadConfig?.enabled;
+        binding.connectionScope === "supervision" && !incognito && pluginsEnabled;
       if (pluginBindingStale && !canRefreshSupervisedPlugins) {
         embeddedAgentLog.debug(
           "codex app-server plugin app config changed; starting a new thread",
