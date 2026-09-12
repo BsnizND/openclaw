@@ -3952,6 +3952,154 @@ describe("Codex app-server supervised branch lifecycle", () => {
   });
 
   it.each([
+    { scenario: "new plugin inputs", error: undefined },
+    { scenario: "changed plugin configuration", error: undefined },
+    { scenario: "external writer", error: "already has an active writer" },
+    { scenario: "retained configuration", error: "did not confirm unloading" },
+    { scenario: "app inventory rejected", error: "Codex could not confirm admitted apps" },
+    { scenario: "policy rejection", error: "policy rejected" },
+    { scenario: "plugins disabled", error: "prevents rotating a stale thread binding" },
+    { scenario: "incognito", error: "prevents rotating a stale thread binding" },
+  ])("refreshes stale supervised plugin inputs: $scenario", async ({ scenario, error }) => {
+    const workspaceDir = path.join(tempDir, "workspace");
+    const attempt = createThreadLifecycleParams(path.join(tempDir, "session.jsonl"), workspaceDir);
+    attempt.agentDir = path.join(tempDir, "agent");
+    if (scenario === "incognito") {
+      attempt.sessionKey = "agent:main:internal-session-effects:incognito-plugin-refresh";
+    }
+    const appServer = createThreadLifecycleAppServerOptions();
+    const { identity, threadId } = await seedAdoptedThreadBinding(attempt, workspaceDir);
+    attempt.expectedSessionRuntimeOwnership = { model: "native", auth: "native" };
+    const rolloutPath = path.join(
+      resolveCodexAppServerHomeDir(attempt.agentDir),
+      "sessions",
+      `rollout-${threadId}.jsonl`,
+    );
+    await writeNativeCatalogFixture(rolloutPath, threadId, []);
+    const pluginThreadConfig = createProvisionalPluginThreadConfigProvider("linear-app");
+    const pluginConfig = await pluginThreadConfig.build();
+    await testCodexAppServerBindingStore.mutate(identity, {
+      kind: "patch",
+      threadId,
+      patch: {
+        connectionScope: "supervision",
+        supervisionSourceThreadId: "thread-source",
+        conversationSourceTransferComplete: true,
+        rolloutPath,
+        model: "native-effective",
+        modelProvider: "openai",
+        appServerRuntimeFingerprint: buildCodexAppServerConnectionFingerprint(
+          appServer,
+          attempt.agentDir,
+        ),
+        pluginAppsFingerprint:
+          scenario === "changed plugin configuration"
+            ? "previous-plugin-config"
+            : pluginConfig.fingerprint,
+        pluginAppsInputFingerprint: "plugin-input-before-upgrade",
+        pluginAppPolicyContext: pluginConfig.policyContext,
+      },
+    });
+    const before = structuredClone(testCodexAppServerBindingStore.read(identity));
+    pluginThreadConfig.enabled = scenario !== "plugins disabled";
+    const native = nativeThreadResult(threadId, "native-effective", "openai");
+    const request = vi.fn(async (method: string, requestParams?: unknown) => {
+      if (method === "config/read") {
+        return { config: {}, origins: {}, layers: [] };
+      }
+      if (method === "configRequirements/read") {
+        return { requirements: null };
+      }
+      if (method === "thread/read") {
+        return {
+          thread: {
+            ...native.thread,
+            path: rolloutPath,
+            status: { type: scenario === "retained configuration" ? "idle" : "notLoaded" },
+          },
+        };
+      }
+      if (method === "thread/resume") {
+        expect(requestParams).toMatchObject({
+          threadId,
+          config: { apps: { "linear-app": { destructive_enabled: false } } },
+        });
+        expect(requestParams).not.toHaveProperty("model");
+        expect(requestParams).not.toHaveProperty("modelProvider");
+        if (scenario === "external writer") {
+          throw new Error(`thread ${threadId} already has an active writer`);
+        }
+        return native;
+      }
+      if (method === "app/installed") {
+        if (scenario === "app inventory rejected") {
+          throw new Error("app inventory offline");
+        }
+        return {
+          apps: [{ id: "linear-app", runtimeName: "Linear", enabled: true, callable: true }],
+        };
+      }
+      if (method === "thread/inject_items") {
+        expect(testCodexAppServerBindingStore.read(identity)).toEqual(before);
+        if (scenario === "policy rejection") {
+          throw new Error("policy rejected");
+        }
+        return {};
+      }
+      if (method === "thread/unsubscribe") {
+        return {};
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const result = withLeasedCodexTestClient({
+      agentDir: attempt.agentDir,
+      request,
+      run: (client) =>
+        startOrResumeThread({
+          client,
+          params: attempt,
+          cwd: workspaceDir,
+          dynamicTools: [],
+          developerInstructions: "Current OpenClaw policy.",
+          appServer,
+          pluginThreadConfig,
+          signal: AbortSignal.timeout(5_000),
+        }),
+    });
+    if (error) {
+      await expect(result).rejects.toThrow(error);
+      expect(testCodexAppServerBindingStore.read(identity)).toEqual(before);
+      expect(request.mock.calls.map(([method]) => method)).not.toContain("thread/start");
+      expect(request.mock.calls.map(([method]) => method)).not.toContain("thread/fork");
+      return;
+    }
+    await expect(result).resolves.toMatchObject({
+      threadId,
+      model: "native-effective",
+      modelProvider: "openai",
+      preserveNativeModel: true,
+      lifecycle: { action: "resumed" },
+    });
+    expect(testCodexAppServerBindingStore.read(identity)).toMatchObject({
+      threadId,
+      connectionScope: "supervision",
+      supervisionSourceThreadId: "thread-source",
+      pluginAppsFingerprint: "plugin-config-linear-app",
+      pluginAppsInputFingerprint: "plugin-input-linear-app",
+      dynamicToolsFingerprint: before?.dynamicToolsFingerprint,
+    });
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "config/read",
+      "configRequirements/read",
+      "thread/read",
+      "thread/resume",
+      "app/installed",
+      "thread/inject_items",
+    ]);
+  });
+
+  it.each([
     { incognito: false, fault: "none" },
     { incognito: true, fault: "none" },
     { incognito: false, fault: "unsubscribe rejected" },

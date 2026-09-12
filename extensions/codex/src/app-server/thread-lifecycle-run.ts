@@ -600,12 +600,15 @@ export async function startOrResumeThread(
         currentInputFingerprint: params.pluginThreadConfig?.inputFingerprint,
         hasBindingPolicyContext: Boolean(binding.pluginAppPolicyContext),
       });
-      if (pluginBindingStale) {
+      // Supervision cold-resumes with unload, app, and policy checks before committing.
+      const canRefreshSupervisedPlugins =
+        binding.connectionScope === "supervision" &&
+        !incognito &&
+        params.pluginThreadConfig?.enabled;
+      if (pluginBindingStale && !canRefreshSupervisedPlugins) {
         embeddedAgentLog.debug(
           "codex app-server plugin app config changed; starting a new thread",
-          {
-            threadId: binding.threadId,
-          },
+          { threadId: binding.threadId },
         );
         await clearCurrentBinding("rotating a stale thread binding");
         binding = undefined;
