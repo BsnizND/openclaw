@@ -337,6 +337,11 @@ native search includes transcript previews. The Control UI and operator CLI
 still provide bounded title-only search. Rename, unarchive, detached fork, and
 archive of an unrelated unowned thread require
 `allowWriteControls`. Neither option bypasses the locked binding.
+Native queue writes use a separate `allowQueueControls` grant and a trusted
+absolute local `queueEndpoint` using `unix://`. Queue readback requires
+`allowRawTranscripts` and remains available after the queue-write grant is
+revoked. Neither queue action starts, resumes, forks, adopts, or attaches a
+thread.
 
 OpenClaw does not subscribe to or answer approval requests while merely listing
 the source thread or displaying the pending Chat. Starting a distinct canonical
@@ -533,12 +538,17 @@ additionally requires `operator.admin`. Subsequent bound turns enforce the
 native-execution owner/admin check.
 
 `supervision.allowRawTranscripts` and `supervision.allowWriteControls` govern
-autonomous agent and standalone MCP tools. Both default to `false`. With
+autonomous agent and standalone MCP tools. The separate
+`supervision.allowQueueControls` option gates owner-authorized `codex_threads`
+queue writes. All three default to `false`. With
 supervision enabled, `codex_threads` removes transcript previews and turns from
 list and metadata-only read results unless raw transcripts are allowed. A
 turn-inclusive read fails closed. Every fork, rename, archive, and unarchive
-requires write controls. These options do not gate authenticated Control UI
-transcript viewing and do not bypass binding, host, status, or confirmation checks.
+requires write controls. Queue writes require queue controls and a configured
+absolute local Unix queue endpoint. `queue_list` requires raw-transcript access
+and the same endpoint, but not the queue-write grant. These options do not gate
+authenticated Control UI transcript viewing and do not bypass binding, host,
+status, or confirmation checks.
 
 ### Compatibility tools
 

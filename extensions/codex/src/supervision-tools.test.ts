@@ -97,7 +97,13 @@ describe("Codex supervision compatibility tools", () => {
       return {};
     });
     const tools = createTestSupervisionTools({
-      getPluginConfig: () => ({ supervision: { enabled: true } }),
+      getPluginConfig: () => ({
+        supervision: {
+          enabled: true,
+          allowQueueControls: true,
+          queueEndpoint: "unix:///tmp/codex-app-server-control.sock",
+        },
+      }),
       senderIsOwner: true,
       env: { [LEGACY_CODEX_SUPERVISOR_ENDPOINTS_ENV]: "local" },
       request,
@@ -184,7 +190,13 @@ describe("Codex supervision compatibility tools", () => {
   it("retains the five shipped tool names and policy gates", async () => {
     const { request } = createRequest({ id: "thread-1", status: { type: "idle" } });
     const tools = createTestSupervisionTools({
-      getPluginConfig: () => ({ supervision: { enabled: true } }),
+      getPluginConfig: () => ({
+        supervision: {
+          enabled: true,
+          allowQueueControls: true,
+          queueEndpoint: "unix:///tmp/codex-app-server-control.sock",
+        },
+      }),
       senderIsOwner: true,
       request,
     });

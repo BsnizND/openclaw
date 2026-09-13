@@ -298,7 +298,12 @@
             }
           },
           "allowRawTranscripts": { "type": "boolean", "default": false },
-          "allowWriteControls": { "type": "boolean", "default": false }
+          "allowWriteControls": { "type": "boolean", "default": false },
+          "allowQueueControls": { "type": "boolean", "default": false },
+          "queueEndpoint": {
+            "type": "string",
+            "pattern": "^unix:///[^?#]+$"
+          }
         }
       },
       "appServer": {
@@ -597,6 +602,16 @@
     "supervision.allowWriteControls": {
       "label": "Allow Write Control Tools",
       "help": "Allow supervision agent tools to control turns and let codex_threads fork, rename, archive, or unarchive native threads.",
+      "advanced": true
+    },
+    "supervision.allowQueueControls": {
+      "label": "Allow Queue Controls",
+      "help": "Allow owner-authorized codex_threads queue writes. This does not enable fork, rename, archive, unarchive, or legacy active-turn writes.",
+      "advanced": true
+    },
+    "supervision.queueEndpoint": {
+      "label": "Native Queue Endpoint",
+      "help": "Trusted absolute local unix:// socket URL used only for codex_threads queue and queue_list requests.",
       "advanced": true
     },
     "appServer": {

@@ -101,6 +101,33 @@ const codexPluginsConfigSchema = z
   })
   .strict();
 
+export function isAbsoluteLocalCodexUnixUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith("unix:///")) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.protocol === "unix:" &&
+      parsed.hostname === "" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.port === "" &&
+      parsed.pathname.startsWith("/") &&
+      parsed.pathname !== "/" &&
+      parsed.search === "" &&
+      parsed.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+const codexQueueEndpointSchema = z
+  .string()
+  .trim()
+  .refine(isAbsoluteLocalCodexUnixUrl, "must be an absolute local unix:// URL");
+
 const codexSupervisionEndpointSchema = z.union([
   z
     .object({
@@ -129,6 +156,8 @@ const codexSupervisionConfigSchema = z
     endpoints: z.array(codexSupervisionEndpointSchema).optional(),
     allowRawTranscripts: z.boolean().optional(),
     allowWriteControls: z.boolean().optional(),
+    allowQueueControls: z.boolean().optional(),
+    queueEndpoint: codexQueueEndpointSchema.optional(),
   })
   .strict();
 

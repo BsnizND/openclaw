@@ -36,6 +36,8 @@ import type {
 } from "./protocol-control-plane.js";
 import type { JsonObject, JsonValue } from "./protocol-json.js";
 import type * as CodexMcpProtocol from "./protocol-mcp.js";
+import type * as CodexQueueProtocol from "./protocol-thread-queue.js";
+import type { CodexUserInput } from "./protocol-user-input.js";
 
 export type {
   CodexConfigReadResponse,
@@ -45,7 +47,8 @@ export type {
   CodexPluginReadResponse,
 } from "./protocol-control-plane.js";
 export type { CodexListMcpServerStatusResponse, CodexMcpServerStatus } from "./protocol-mcp.js";
-export { isRpcResponse } from "./protocol-json.js";
+export { isJsonObject, isRpcResponse } from "./protocol-json.js";
+export type { CodexUserInput } from "./protocol-user-input.js";
 export type {
   JsonObject,
   JsonValue,
@@ -103,29 +106,6 @@ export type CodexInitializeResponse = {
   platformFamily?: string;
   platformOs?: string;
 };
-
-export type CodexUserInput =
-  | {
-      type: "text";
-      text: string;
-      text_elements: Array<{
-        byteRange: { start: number; end: number };
-        placeholder: string | null;
-      }>;
-    }
-  | {
-      type: "image";
-      url: string;
-    }
-  | {
-      type: "localImage";
-      path: string;
-    }
-  | {
-      type: "skill";
-      name: string;
-      path: string;
-    };
 
 export type CodexDynamicToolFunctionSpec = JsonObject & {
   type: "function";
@@ -708,6 +688,8 @@ type CodexAppServerRequestParamsOverride = {
   "thread/list": CodexThreadListParams;
   "thread/turns/list": CodexThreadTurnsListParams;
   "thread/items/list": CodexThreadItemsListParams;
+  "thread/queue/add": CodexQueueProtocol.CodexThreadQueueAddParams;
+  "thread/queue/list": CodexQueueProtocol.CodexThreadQueueListParams;
   "thread/name/set": CodexThreadSetNameParams;
   "thread/read": CodexThreadReadParams;
   "thread/resume": CodexThreadResumeParams;
@@ -764,6 +746,8 @@ type CodexAppServerRequestResultMap = {
   "thread/list": CodexThreadListResponse;
   "thread/turns/list": CodexThreadTurnsListResponse;
   "thread/items/list": CodexThreadItemsListResponse;
+  "thread/queue/add": CodexQueueProtocol.CodexThreadQueueAddResponse;
+  "thread/queue/list": CodexQueueProtocol.CodexThreadQueueListResponse;
   "thread/name/set": JsonValue;
   "thread/read": CodexThreadReadResponse;
   "thread/resume": CodexThreadResumeResponse;
@@ -777,7 +761,3 @@ type CodexAppServerRequestResultMap = {
   "turn/start": CodexTurnStartResponse;
   "turn/steer": CodexTurnSteerResponse;
 };
-
-export function isJsonObject(value: unknown): value is JsonObject {
-  return isRecord(value);
-}

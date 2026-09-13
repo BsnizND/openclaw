@@ -29,6 +29,11 @@ import {
 import type { CodexAppServerBindingStore } from "./app-server/session-binding.js";
 import { assertCodexArchiveDescendantsUnowned } from "./app-server/thread-archive-guard.js";
 import type { codexControlRequest, CodexControlRequestOptions } from "./command-rpc.js";
+import {
+  executeNativeThreadQueueAction,
+  QueueListParamsSchema,
+  QueueParamsSchema,
+} from "./native-thread-queue.js";
 
 const ListParamsSchema = Type.Object(
   {
@@ -108,6 +113,8 @@ const CodexThreadsParamsSchema = Type.Union([
   RenameParamsSchema,
   ArchiveParamsSchema,
   UnarchiveParamsSchema,
+  QueueParamsSchema,
+  QueueListParamsSchema,
 ]);
 
 type CodexThreadsToolOptions = {
@@ -196,7 +203,7 @@ export function createCodexThreadsTool(options: CodexThreadsToolOptions): AnyAge
     name: "codex_threads",
     label: "Codex Threads",
     description:
-      "Manage native Codex threads: list, read, fork, rename, archive (confirm:true), unarchive. When supervision is enabled, raw transcript reads and every mutation require their matching supervision policy option.",
+      "Manage native Codex threads: list, read, queue attributed work, inspect queued work, fork, rename, archive (confirm:true), and unarchive. Native queue acceptance means queued, not consumed or completed. When supervision is enabled, raw transcript reads and each mutation require their matching supervision policy option.",
     parameters: CodexThreadsParamsSchema,
     async execute(_toolCallId, rawParams) {
       const currentSession = () => {
@@ -242,6 +249,15 @@ export function createCodexThreadsTool(options: CodexThreadsToolOptions): AnyAge
         session ? options.bindingStore.read(currentIdentity(session.sessionId)) : undefined;
       const params = asOptionalRecord(rawParams) ?? {};
       const action = readStringParam(params, "action", { required: true, label: "action" });
+      if (action === "queue" || action === "queue_list") {
+        return executeNativeThreadQueueAction({
+          action,
+          params,
+          getPluginConfig: options.getPluginConfig,
+          baseRequestOptions,
+          request: options.request,
+        });
+      }
       const admissionConfig = options.getPluginConfig();
       const admissionPlugin = readCodexPluginConfig(admissionConfig);
       const supervision = admissionPlugin.supervision;

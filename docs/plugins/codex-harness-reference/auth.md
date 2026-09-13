@@ -80,9 +80,11 @@ explicit Unix transport. It uses `$CODEX_HOME` when set and `~/.codex`
 otherwise, including native auth, config, plugins, and threads.
 OpenClaw skips its auth-profile bridge for the app-server. Verified owner
 turns can use `codex_threads` to list (with an optional `search` filter),
-read, fork, rename, archive, and unarchive those threads. Fork a thread before
-continuing it in OpenClaw; independent Codex processes do not coordinate
-concurrent writers for the same thread.
+read, queue attributed work, inspect queued work, fork, rename, archive, and
+unarchive those threads. Queue actions additionally require enabled supervision
+and its dedicated local Unix endpoint. Fork a thread before continuing it in
+OpenClaw; independent Codex processes do not coordinate concurrent writers for
+the same thread.
 
 For bounded transcript reads, call `codex_threads` with `action: "read"`,
 `thread_id`, `include_turns: true`, and `item_limit` (1–50). This requires native
@@ -95,6 +97,28 @@ exceeds that bound, the tool fails without returning items or advancing the
 cursor; inspect that content in Codex. Smaller model-context limits can still
 truncate a page. Reads without `item_limit` or `cursor` retain the existing
 metadata/full-transcript behavior.
+
+To contribute to an existing task through its native owner, configure
+`supervision.queueEndpoint` with a trusted absolute local `unix://` URL and set
+`supervision.allowQueueControls: true`. Call `codex_threads` with
+`action: "queue"`, the selected `thread_id`, attributed `text`, and a
+`client_user_message_id`. The returned native submission is queued; it does not
+prove that the owner consumed or completed it. The client message id is a
+correlation value, not a deduplication key, so an uncertain acknowledgment must
+be reconciled before another enqueue.
+
+Use `action: "queue_list"` with the same task and optional opaque `cursor` and
+`limit` (1–50) to inspect complete pending submissions. Queue readback requires
+`allowRawTranscripts` because it exposes message content, but remains available
+when `allowQueueControls` is revoked. Pages default to 10 entries and may return
+fewer to stay within the complete-result budget. If one submission cannot fit,
+the action fails without advancing the cursor.
+
+Queueing a request to create another task is still only a queued request. The
+selected native task may use its own Codex task-creation tool, but OpenClaw does
+not report the new task as created until that native tool returns a real task id
+and host. `codex_threads` does not expose a create action or map creation to
+`thread/start`.
 
 That `homeScope` opt-in applies to ordinary harness sessions. Hosted web search
 and settled-turn finalization use private temporary homes and OpenClaw auth
@@ -113,6 +137,9 @@ is disabled, list search is also rejected because native search can match
 transcript previews. Rename, unarchive, detached fork, and archive of an
 unrelated thread not owned by another OpenClaw Chat require
 `allowWriteControls`. Neither option bypasses a locked binding.
+Queue writes instead require `allowQueueControls` and `queueEndpoint`; queue
+readback requires `allowRawTranscripts` and the same endpoint. These queue
+permissions do not attach or replace the Chat's binding.
 
 OpenClaw does not rewrite `HOME` for normal local app-server launches.
 Codex-run subprocesses such as `openclaw`, `gh`, `git`, cloud CLIs, and shell

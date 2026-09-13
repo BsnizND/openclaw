@@ -18,6 +18,8 @@ export const CODEX_CONTROL_METHODS = {
   listThreads: "thread/list",
   listThreadTurns: "thread/turns/list",
   listThreadItems: "thread/items/list",
+  listThreadQueue: "thread/queue/list",
+  queueThread: "thread/queue/add",
   readThread: "thread/read",
   rateLimits: "account/rateLimits/read",
   archiveThread: "thread/archive",
