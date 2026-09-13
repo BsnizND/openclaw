@@ -63,6 +63,7 @@ type RequestOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   assertCurrent?: () => void;
+  onWriteStateChange?: (mayHaveWritten: boolean) => void;
 };
 
 /** Process-local generation fence for bindings tied to one app-server client instance. */
@@ -90,7 +91,7 @@ export function isCodexAppServerOverloadError(error: unknown): error is CodexApp
   );
 }
 
-class CodexAppServerLocalRequestCancellationError extends Error {
+export class CodexAppServerLocalRequestCancellationError extends Error {
   readonly code = "CODEX_APP_SERVER_LOCAL_REQUEST_CANCELLED";
 
   constructor(
@@ -513,6 +514,7 @@ export class CodexAppServerClient {
             },
             (mayHaveWritten) => {
               requestMayHaveWritten = mayHaveWritten;
+              options.onWriteStateChange?.(mayHaveWritten);
             },
           );
         } catch (error) {
@@ -531,7 +533,7 @@ export class CodexAppServerClient {
         }
       })();
     }
-    return this.requestWithOverloadRetry<T>(method, params, options);
+    return this.requestWithOverloadRetry<T>(method, params, options, options.onWriteStateChange);
   }
 
   private async requestWithOverloadRetry<T>(

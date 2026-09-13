@@ -143,18 +143,28 @@ export async function executeNativeThreadQueueAction(options: {
   const neutralStart = resolveCodexSupervisionAppServerRuntimeOptions({
     pluginConfig: { supervision: { enabled: true } },
   }).start;
-  const queueRequestOptions = (endpoint: string): CodexControlRequestOptions => ({
-    ...options.baseRequestOptions(),
-    authProfileId: null,
-    startOptions: {
-      ...neutralStart,
-      transport: "unix",
-      homeScope: "user",
-      url: endpoint,
-      authToken: undefined,
-      headers: {},
-    },
-  });
+  const queueRequestOptions = (endpoint: string): CodexControlRequestOptions => {
+    const inherited = options.baseRequestOptions();
+    return {
+      ...inherited,
+      assertCurrent: () => {
+        inherited.assertCurrent?.();
+        const { endpoint: currentEndpoint } = readQueuePolicy(options.getPluginConfig(), action);
+        if (currentEndpoint !== endpoint) {
+          throw new Error("Codex native queue endpoint changed while the request was waiting.");
+        }
+      },
+      authProfileId: null,
+      startOptions: {
+        ...neutralStart,
+        transport: "unix",
+        homeScope: "user",
+        url: endpoint,
+        authToken: undefined,
+        headers: {},
+      },
+    };
+  };
 
   if (action === "queue") {
     const text = readStringParam(params, "text", { required: true, label: "text", trim: false });

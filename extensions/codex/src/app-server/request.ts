@@ -3,7 +3,10 @@
  * checks, shared-client leasing, and isolated-client shutdown handling.
  */
 import type { resolveCodexAppServerAuthProfileIdForAgent } from "./auth-profile.js";
-import type { CodexAppServerClient } from "./client.js";
+import {
+  CodexAppServerLocalRequestCancellationError,
+  type CodexAppServerClient,
+} from "./client.js";
 import type { CodexAppServerStartOptions } from "./config.js";
 import type {
   CodexAppServerRequestMethod,
@@ -235,6 +238,7 @@ export async function withCodexAppServerJsonClient<T>(
   const timeoutMessage = params.timeoutMessage ?? "codex app-server request timed out";
   const timeoutController = new AbortController();
   const deadline = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
+  const activeRequests = new Set<{ method: string; mayHaveWritten: boolean }>();
   const isPastDeadline = () => deadline !== undefined && Date.now() >= deadline;
   const throwIfAbandoned = () => {
     if (timeoutController.signal.aborted && timeoutController.signal.reason instanceof Error) {
@@ -310,14 +314,23 @@ export async function withCodexAppServerJsonClient<T>(
                 throw new CodexAppServerScopedRequestRejectedError(sandboxBlock);
               }
               assertCurrent();
-              return await client.request<R>(request.method, request.requestParams, {
-                timeoutMs: remainingTimeoutMs(),
-                signal: timeoutController.signal,
-                assertCurrent: () => {
-                  assertCurrent();
-                  request.assertCurrent?.();
-                },
-              });
+              const writeState = { method: request.method, mayHaveWritten: false };
+              activeRequests.add(writeState);
+              try {
+                return await client.request<R>(request.method, request.requestParams, {
+                  timeoutMs: remainingTimeoutMs(),
+                  signal: timeoutController.signal,
+                  assertCurrent: () => {
+                    assertCurrent();
+                    request.assertCurrent?.();
+                  },
+                  onWriteStateChange: (mayHaveWritten) => {
+                    writeState.mayHaveWritten = mayHaveWritten;
+                  },
+                });
+              } finally {
+                activeRequests.delete(writeState);
+              }
             };
             return await run(scopedRequest, client, {
               assertCurrent,
@@ -355,6 +368,18 @@ export async function withCodexAppServerJsonClient<T>(
         }
         throw new Error("Codex app-server selection retry loop exited unexpectedly");
       })(),
+      createTimeoutError: () => {
+        for (const request of activeRequests) {
+          if (request.mayHaveWritten) {
+            return new CodexAppServerLocalRequestCancellationError(
+              request.method,
+              "timed out",
+              true,
+            );
+          }
+        }
+        return new Error(timeoutMessage);
+      },
     });
   } catch (error) {
     if (isPastDeadline()) {
