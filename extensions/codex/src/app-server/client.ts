@@ -176,6 +176,23 @@ export function isCodexAppServerIndeterminateTransportError(error: unknown): err
   );
 }
 
+/** Finds a possibly-written request failure retained below request-layer wrappers. */
+export function findCodexAppServerIndeterminateRequestError(error: unknown): Error | undefined {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (
+      isCodexAppServerIndeterminateRequestCancellationError(current) ||
+      isCodexAppServerIndeterminateTransportError(current)
+    ) {
+      return current;
+    }
+    current = current.cause;
+  }
+  return undefined;
+}
+
 /** Returns true for errors that mean the app-server transport is closed. */
 export function isCodexAppServerConnectionClosedError(error: unknown): boolean {
   if (!(error instanceof Error)) {

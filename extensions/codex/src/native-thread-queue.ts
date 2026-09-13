@@ -99,6 +99,32 @@ function readQueuedSubmissionPage(
   return { data: value.data, nextCursor: value.nextCursor ?? null };
 }
 
+function uncertainQueueAcknowledgmentError(
+  threadId: string,
+  clientUserMessageId: string,
+  cause: unknown,
+): Error {
+  return new Error(
+    `Codex native queue acknowledgment is uncertain for thread ${threadId} and client_user_message_id ${clientUserMessageId}. Do not resend automatically; reconcile with queue_list or native transcript reads before deciding whether to enqueue again.`,
+    { cause },
+  );
+}
+
+function readQueuedSubmissionResponse(
+  response: unknown,
+  clientUserMessageId: string,
+): CodexQueuedSubmission {
+  if (!isJsonObject(response) || !isQueuedSubmission(response.queuedSubmission)) {
+    throw new Error("Codex thread/queue/add queuedSubmission is missing or invalid.");
+  }
+  if (response.queuedSubmission.clientUserMessageId !== clientUserMessageId) {
+    throw new Error(
+      `Codex thread/queue/add queuedSubmission clientUserMessageId mismatch: expected ${clientUserMessageId}, received ${response.queuedSubmission.clientUserMessageId}.`,
+    );
+  }
+  return response.queuedSubmission;
+}
+
 export async function executeNativeThreadQueueAction(options: {
   action: "queue" | "queue_list";
   params: Record<string, unknown>;
@@ -154,33 +180,24 @@ export async function executeNativeThreadQueueAction(options: {
         queueRequestOptions(endpoint),
       );
     } catch (error) {
-      const {
-        isCodexAppServerIndeterminateRequestCancellationError,
-        isCodexAppServerIndeterminateTransportError,
-      } = await import("./app-server/client.js");
-      if (
-        isCodexAppServerIndeterminateRequestCancellationError(error) ||
-        isCodexAppServerIndeterminateTransportError(error)
-      ) {
-        throw new Error(
-          `Codex native queue acknowledgment is uncertain for thread ${threadId} and client_user_message_id ${clientUserMessageId}. Do not resend automatically; reconcile with queue_list or native transcript reads before deciding whether to enqueue again.`,
-          { cause: error },
-        );
+      const { findCodexAppServerIndeterminateRequestError } =
+        await import("./app-server/client.js");
+      if (findCodexAppServerIndeterminateRequestError(error)) {
+        throw uncertainQueueAcknowledgmentError(threadId, clientUserMessageId, error);
       }
       throw error;
     }
-    if (
-      !isJsonObject(response) ||
-      !isQueuedSubmission(response.queuedSubmission) ||
-      response.queuedSubmission.clientUserMessageId !== clientUserMessageId
-    ) {
-      throw new Error("Codex app-server returned an invalid thread/queue/add response.");
+    let queuedSubmission: CodexQueuedSubmission;
+    try {
+      queuedSubmission = readQueuedSubmissionResponse(response, clientUserMessageId);
+    } catch (error) {
+      throw uncertainQueueAcknowledgmentError(threadId, clientUserMessageId, error);
     }
     return jsonResult({
       action,
       status: "queued",
       threadId,
-      queuedSubmission: response.queuedSubmission,
+      queuedSubmission,
     });
   }
 

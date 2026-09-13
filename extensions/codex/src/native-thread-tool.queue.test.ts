@@ -296,6 +296,49 @@ describe("native Codex thread queue controls", () => {
     }),
   );
 
+  it.each([
+    {
+      name: "a malformed queued submission",
+      response: { queuedSubmission: { id: "queued-malformed" } },
+      validation: "queuedSubmission is missing or invalid",
+    },
+    {
+      name: "a mismatched logical id",
+      response: {
+        queuedSubmission: {
+          id: "queued-mismatch",
+          input: QUEUE_INPUT,
+          clientUserMessageId: "logical-other",
+        },
+      },
+      validation: "expected logical-response, received logical-other",
+    },
+  ])("reports $name as an uncertain acknowledgment without retrying", ({ response, validation }) =>
+    withFixture(async () => {
+      const request = vi.fn(async () => response);
+      const tool = createTool({ request });
+
+      const observed = await tool
+        ?.execute("queue-invalid-response", {
+          action: "queue",
+          thread_id: "thread-response",
+          text: QUEUE_TEXT,
+          client_user_message_id: "logical-response",
+        })
+        .catch((error: unknown) => error);
+
+      expect(observed).toBeInstanceOf(Error);
+      expect((observed as Error).message).toContain("acknowledgment is uncertain");
+      expect((observed as Error).message).toContain("thread-response");
+      expect((observed as Error).message).toContain("logical-response");
+      expect((observed as Error).message).toContain("Do not resend");
+      expect(observed).toMatchObject({
+        cause: expect.objectContaining({ message: expect.stringContaining(validation) }),
+      });
+      expect(request).toHaveBeenCalledOnce();
+    }),
+  );
+
   it("lists complete queued submissions after queue-write permission is revoked", () =>
     withFixture(async () => {
       let pluginConfig: unknown = queueConfig();
