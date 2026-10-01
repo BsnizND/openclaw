@@ -9,6 +9,7 @@ import type { SessionAcpMeta, SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type {
   OpenKeyedStoreOptions,
+  OpenRetainedKeyedStoreOptions,
   PluginDoctorRawStateEntry,
   PluginStateKeyedStore,
 } from "../plugin-state/plugin-state-store.js";
@@ -59,6 +60,12 @@ export type PluginDoctorStateMigrationContext = {
     acpxRecordId: string;
   }) => void;
   openPluginStateKeyedStore: <T>(options: OpenKeyedStoreOptions) => PluginStateKeyedStore<T>;
+  /** Non-creating read of the plugin owner's retained receipt namespace. */
+  lookupPluginStateRetainedEntry?: <T>(namespace: string, key: string) => Promise<T | undefined>;
+  /** Explicit offline recovery only; retained receipts survive binding and session cleanup. */
+  openPluginStateRetainedStore?: <T>(
+    options: OpenRetainedKeyedStoreOptions,
+  ) => PluginStateKeyedStore<T>;
   /** Doctor-only batch import preserving source age and remaining retention. */
   importPluginStateEntries?: (
     options: OpenKeyedStoreOptions,
@@ -164,6 +171,17 @@ export type PluginDoctorMigrationBackupWarning = {
   message: string;
 };
 
+export type PluginDoctorRecoveryRequest = {
+  action: string;
+  ids: readonly string[];
+  reason: string;
+};
+
+export type PluginDoctorStateRecoveryInput = PluginDoctorStateMigrationInput & {
+  /** Held by the host across inspection and the final receipt commit. */
+  assertCurrent(): void;
+};
+
 export type PluginDoctorStateMigration = {
   id: string;
   label: string;
@@ -188,6 +206,11 @@ export type PluginDoctorStateMigration = {
     | Promise<PluginDoctorStateMigrationDetection | null>
     | PluginDoctorStateMigrationDetection
     | null;
+  /** Explicit operator recovery; never invoked by automatic migrations or startup. */
+  recoverLegacyState?: (
+    params: PluginDoctorStateRecoveryInput,
+    request: PluginDoctorRecoveryRequest,
+  ) => Promise<PluginDoctorStateMigrationResult>;
   migrateLegacyState: (
     params: PluginDoctorStateMigrationInput,
   ) => Promise<PluginDoctorStateMigrationResult> | PluginDoctorStateMigrationResult;
@@ -273,6 +296,8 @@ function coercePluginDoctorStateMigrations(value: unknown): PluginDoctorStateMig
     doctorOnly: migration.doctorOnly === true ? true : undefined,
     phase: migration.phase === "after-session-repair" ? migration.phase : undefined,
     collectBackupResources: migration.collectBackupResources,
+    recoverLegacyState:
+      typeof migration.recoverLegacyState === "function" ? migration.recoverLegacyState : undefined,
     detectLegacyState: migration.detectLegacyState,
     migrateLegacyState: migration.migrateLegacyState,
   }));
