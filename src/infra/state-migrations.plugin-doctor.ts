@@ -410,7 +410,13 @@ export async function runPostSessionPluginDoctorStateRepairs(params: {
   maintenanceAuthority?: { assertCurrent(): void };
   plannedActions?: readonly PlannedPluginDoctorAction[];
   inventory?: PluginDoctorStateMigrationInventory;
-  recovery?: { pluginId: string; migrationId: string; request: PluginDoctorRecoveryRequest };
+  recovery?: {
+    pluginId: string;
+    migrationId: string;
+    request: PluginDoctorRecoveryRequest;
+    /** Existing-schema CLI leases release before ordinary worker-backed repair. */
+    deferRepair?: true;
+  };
   beforeCompletion?: (
     completedPluginIds: readonly string[],
     assertCurrent: () => void,
@@ -559,7 +565,8 @@ export async function runPostSessionPluginDoctorStateRepairs(params: {
                 selection.request,
               );
               authority.assertCurrent();
-              if (recoveryResult.warnings.length) {
+              completed = recoveryResult;
+              if (recoveryResult.warnings.length || selection.deferRepair) {
                 return recoveryResult;
               }
             }
