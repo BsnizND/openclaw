@@ -2,10 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createPluginStateKeyedStore } from "../plugin-state/plugin-state-store.js";
+import type {
+  PluginDoctorStateRecoveryInput,
+  PluginDoctorRecoveryRequest,
+} from "../plugins/doctor-contract-module.js";
 import type { listPluginDoctorStateMigrationEntries } from "../plugins/doctor-contract-registry.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { createTrackedTempDirs } from "../test-utils/tracked-temp-dirs.js";
+import {
+  readDeferredPluginMigrations,
+  recordDeferredPluginMigrations,
+} from "./deferred-plugin-migrations.js";
 import {
   autoMigrateLegacyPluginDoctorState,
   runPostSessionPluginDoctorStateRepairs,
@@ -51,6 +60,92 @@ afterEach(async () => {
 });
 
 describe("plugin Doctor migrations", () => {
+  it.each([true, false])(
+    "runs only trusted explicit recovery and settles native readiness (trusted=%s)",
+    async (trusted) => {
+      const stateDir = await tempDirs.make("openclaw-explicit-plugin-recovery-");
+      const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+      await autoMigrateLegacyPluginDoctorState({
+        config: {},
+        env,
+        doctorOnlyStateMigrations: true,
+      });
+      await recordDeferredPluginMigrations({
+        env,
+        pending: [
+          {
+            pluginId: "recovery-owner",
+            reason: "saved state pending",
+            command: "openclaw doctor --fix",
+            requiresStateMigration: true,
+          },
+        ],
+      });
+      const recoverLegacyState = vi.fn(
+        async (params: PluginDoctorStateRecoveryInput, request: PluginDoctorRecoveryRequest) => {
+          params.assertCurrent();
+          if (!params.context.openPluginStateRetainedStore) {
+            throw new Error("Missing native retained receipt authority");
+          }
+          const store = params.context.openPluginStateRetainedStore({
+            namespace: "recovery-receipt",
+            retention: "retained",
+          });
+          if (!store.withCurrent) {
+            throw new Error("Missing action-bound native retained writer");
+          }
+          await store
+            .withCurrent({ assertCurrent: () => params.assertCurrent() })
+            .register("selected", request);
+          return { changes: ["explicit recovery recorded"], warnings: [] };
+        },
+      );
+      controls.entries = [
+        {
+          pluginId: "recovery-owner",
+          channelIds: [],
+          trustedForDurableStores: trusted,
+          migration: {
+            id: "legacy-recovery",
+            label: "Legacy recovery",
+            phase: "after-session-repair",
+            detectLegacyState: () => null,
+            migrateLegacyState: () => ({ changes: [], warnings: [] }),
+            recoverLegacyState,
+          },
+        },
+      ];
+      const request = {
+        action: "retire-without-delivery",
+        ids: ["selected"],
+        reason: "Explicit operator decision",
+      };
+      const result = await runPostSessionPluginDoctorStateRepairs({
+        config: {},
+        env,
+        maintenanceAuthority: { assertCurrent() {} },
+        recovery: { pluginId: "recovery-owner", migrationId: "legacy-recovery", request },
+      });
+      const receipt = await createPluginStateKeyedStore("recovery-owner", {
+        namespace: "recovery-receipt",
+        retention: "retained",
+        env,
+      }).lookup("selected");
+      if (trusted) {
+        expect(result.warnings).toEqual([]);
+        expect(receipt).toEqual(request);
+        expect(readDeferredPluginMigrations({ env })).toEqual([]);
+        expect(result.completedPluginIds).toEqual(["recovery-owner"]);
+      } else {
+        expect(recoverLegacyState).not.toHaveBeenCalled();
+        expect(receipt).toBeUndefined();
+        expect(readDeferredPluginMigrations({ env })).toHaveLength(1);
+        expect(result.completedPluginIds).toBeUndefined();
+        expect(result.warnings.join("\n")).toContain("trusted plugin migration");
+      }
+    },
+  );
+
   it("requires explicit Doctor to repair shared schema before plugin migrations", async () => {
     const root = await tempDirs.make("openclaw-plugin-doctor-shared-schema-");
     const stateDir = path.join(root, ".openclaw");
