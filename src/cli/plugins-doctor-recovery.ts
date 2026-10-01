@@ -28,8 +28,8 @@ async function runPluginDoctorRecovery(opts: PluginDoctorOptions, env = process.
   return await withDoctorSqliteMaintenanceLock({
     env,
     operation: "explicit plugin Doctor recovery",
-    run: async (maintenance) =>
-      withAgentDatabaseMaintenanceLease(
+    run: async (maintenance) => {
+      const prepared = await withAgentDatabaseMaintenanceLease(
         { env, schemaPolicy: "existing", processBound: true },
         async () =>
           withPluginLifecycleLease(
@@ -79,14 +79,37 @@ async function runPluginDoctorRecovery(opts: PluginDoctorOptions, env = process.
                   pluginId: record.id,
                   migrationId: opts.migration!,
                   request: { action: opts.recovery!, ids: opts.ids!, reason: opts.reason! },
+                  deferRepair: true,
                 },
               });
               maintenance.assertCurrent();
               lease.assertOwned();
-              return { ...result, stateDir: resolveStateDir(env) };
+              return { result, config, inventory };
             },
           ),
-      ),
+      );
+      maintenance.assertCurrent();
+      if (prepared.result.warnings.length) {
+        return { ...prepared.result, stateDir: resolveStateDir(env) };
+      }
+      // Existing-schema receipt custody cannot admit SQLite worker writes. Keep
+      // offline ownership while ordinary repair acquires its own native leases.
+      const repaired = await runPostSessionPluginDoctorStateRepairs({
+        config: prepared.config,
+        env,
+        maintenanceAuthority: maintenance,
+        inventory: prepared.inventory,
+      });
+      maintenance.assertCurrent();
+      return {
+        ...repaired,
+        changes: [...prepared.result.changes, ...repaired.changes],
+        ...(prepared.result.notices?.length || repaired.notices?.length
+          ? { notices: [...(prepared.result.notices ?? []), ...(repaired.notices ?? [])] }
+          : {}),
+        stateDir: resolveStateDir(env),
+      };
+    },
   });
 }
 

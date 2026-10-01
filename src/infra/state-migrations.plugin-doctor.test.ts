@@ -2,12 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runPluginsDoctorCommand } from "../cli/plugins-doctor-recovery.js";
 import { createPluginStateKeyedStore } from "../plugin-state/plugin-state-store.js";
 import type {
   PluginDoctorStateRecoveryInput,
   PluginDoctorRecoveryRequest,
 } from "../plugins/doctor-contract-module.js";
 import type { listPluginDoctorStateMigrationEntries } from "../plugins/doctor-contract-registry.js";
+import { defaultRuntime, ExitError } from "../runtime.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { createTrackedTempDirs } from "../test-utils/tracked-temp-dirs.js";
@@ -48,9 +50,32 @@ vi.mock("../plugins/plugin-lifecycle-lease.js", async (importOriginal) => {
   };
 });
 
+vi.mock("../plugins/manifest-registry-build.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../plugins/manifest-registry-build.js")>()),
+  loadBundledPluginManifestRegistry: () => ({
+    plugins: [
+      {
+        id: "recovery-owner",
+        origin: "bundled",
+        channels: [],
+        providers: [],
+        cliBackends: [],
+        skills: [],
+        hooks: [],
+        rootDir: "/fixture",
+        source: "/fixture/index.js",
+        manifestPath: "/fixture/openclaw.plugin.json",
+      },
+    ],
+    diagnostics: [],
+  }),
+}));
+
 const tempDirs = createTrackedTempDirs();
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   controls.entries = [];
   controls.failSettlement = false;
   resetAutoMigrateLegacyStateDirForTest();
@@ -60,7 +85,7 @@ afterEach(async () => {
 });
 
 describe("plugin Doctor migrations", () => {
-  it.each([true, false])(
+  it.each([true, false, "cli"] as const)(
     "runs only trusted explicit recovery and settles native readiness (trusted=%s)",
     async (trusted) => {
       const stateDir = await tempDirs.make("openclaw-explicit-plugin-recovery-");
@@ -104,7 +129,7 @@ describe("plugin Doctor migrations", () => {
         {
           pluginId: "recovery-owner",
           channelIds: [],
-          trustedForDurableStores: trusted,
+          trustedForDurableStores: trusted !== false,
           migration: {
             id: "legacy-recovery",
             label: "Legacy recovery",
@@ -120,12 +145,36 @@ describe("plugin Doctor migrations", () => {
         ids: ["selected"],
         reason: "Explicit operator decision",
       };
-      const result = await runPostSessionPluginDoctorStateRepairs({
-        config: {},
-        env,
-        maintenanceAuthority: { assertCurrent() {} },
-        recovery: { pluginId: "recovery-owner", migrationId: "legacy-recovery", request },
-      });
+      const result = await (async () => {
+        if (trusted !== "cli") {
+          return runPostSessionPluginDoctorStateRepairs({
+            config: {},
+            env,
+            maintenanceAuthority: { assertCurrent() {} },
+            recovery: { pluginId: "recovery-owner", migrationId: "legacy-recovery", request },
+          });
+        }
+        // The actual CLI adds existing-schema leases before normal worker-backed
+        // readiness publication. Owner-only coverage does not exercise that handoff.
+        vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+        vi.stubEnv("OPENCLAW_CONFIG_PATH", path.join(stateDir, "openclaw.json"));
+        fs.writeFileSync(path.join(stateDir, "openclaw.json"), "{}");
+        const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+        const outcome = await runPluginsDoctorCommand({
+          plugin: "recovery-owner",
+          migration: "legacy-recovery",
+          recovery: request.action,
+          ids: request.ids,
+          reason: request.reason,
+          source: "bundled",
+          confirmRetiredWithoutDelivery: true,
+          json: true,
+        }).catch((error: unknown) => error);
+        const commandResult = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+        expect(commandResult.warnings).toEqual([]);
+        expect(outcome).toEqual(new ExitError(0));
+        return commandResult;
+      })();
       const receipt = await createPluginStateKeyedStore("recovery-owner", {
         namespace: "recovery-receipt",
         retention: "retained",
