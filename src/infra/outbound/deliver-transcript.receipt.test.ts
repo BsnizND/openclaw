@@ -87,22 +87,21 @@ it.each(["missing-entry", "stale-session", "mismatched-message-id", "mixed-owner
     if (!saved.ok) {
       throw new Error(saved.reason);
     }
-    const results = [
-      {
-        channel: "webchat",
-        messageId: saved.messageId,
-        meta: {
-          transcriptMessageId: failure === "missing-entry" ? "absent" : saved.messageId,
-          transcriptSessionId: failure === "stale-session" ? "previous-session" : sessionId,
-          transcriptSessionKey: sessionKey,
-        },
+    const receipt = {
+      channel: "webchat",
+      messageId: saved.messageId,
+      meta: {
+        transcriptMessageId: failure === "missing-entry" ? "absent" : saved.messageId,
+        transcriptSessionId: failure === "stale-session" ? "previous-session" : sessionId,
+        transcriptSessionKey: sessionKey,
       },
-    ];
+    };
+    const results = [receipt];
     if (failure === "missing-entry") {
-      results[0].messageId = "absent";
+      receipt.messageId = "absent";
     }
     if (failure === "mismatched-message-id") {
-      results[0].messageId = "different";
+      receipt.messageId = "different";
     }
     if (failure === "mixed-ownership") {
       results.push({
