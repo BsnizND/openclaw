@@ -546,6 +546,7 @@ export async function deliverOutboundPayloadsCore(
   await mirrorDeliveredPayloads({
     delivery: params,
     payloads: deliveredMirrorPayloads,
+    results,
     channel,
     to,
   });
