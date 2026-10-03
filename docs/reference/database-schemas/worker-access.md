@@ -17,8 +17,9 @@ paths are migration debt, not a pattern to extend. The
 candidate main-thread paths from SQL already executing in workers.
 
 Inventory classifications describe counted operations, not whole-module runtime
-safety. Reviewed mixed modules use named operation paths rather than line numbers;
-unreviewed operations retain their conservative file classification. Trace every
+safety. Reviewed mixed modules use named operation paths, optionally narrowed to
+a variable initializer, rather than line numbers. Initializer exceptions exclude
+nested function bodies; unreviewed sites retain their conservative classification. Trace every
 production caller before adding an operation exception, and update existing
 reviewed overrides instead of shadowing them with worker-module entries. The
 ratchet applies the same classification rules to the base and candidate sources,
@@ -30,6 +31,13 @@ provenance's counted CLI writes do not cover its raw Gateway SQL reads. Shared
 incognito category readers and native approval SDK compatibility retain their
 existing classifications. A metadata reclassification changes neither execution
 nor update behavior.
+
+Placement claim/result mutations and notifying event cursor operations have
+reviewed worker-only entries. The event recorder's `registeredWatcherKeys`
+initializer is classified separately from its native event/head SQL. Native
+creation, compaction, adoption, and child-spawn producers are non-notifying;
+child-spawn cursor seeding remains T1. Placement restart clearing remains T2,
+while synchronous result compatibility readers and transition guards remain T1.
 
 Runtime cache-TTL, bootstrap, prompt-error, and provider replay markers append
 through the existing transcript writer worker. Custom-message appends use the
@@ -174,6 +182,44 @@ These adapters remain inactive until P7. Production incognito still uses the
 host owner; no flag selects competing writers. This stage changes no schema,
 retention, durability, session deadline, or update behavior and retires no T1 sites.
 
+### Incognito history (P5a, inactive)
+
+History pages, deltas, selected entries, title/preview, branches, context, search,
+matching, receipts, and hydration can read the actor's retained connection through
+its existing FIFO. Shared selectors also serve durable history; no second SQLite
+reader or database copy is created. Read grants use current actor facts, and
+disclosure rechecks live caller authority after waits. RPC and HTTP composition
+use the existing history kernels with prepared display facts and recheck the
+captured session claim before returning a page.
+
+Hydration acquires one synchronous snapshot and returns detached events through
+the broker's existing result framing. It preserves incognito's full-materialization
+behavior; it does not adopt durable hydration's lower-memory streaming contract.
+Actor loss returns `INCOGNITO_SESSION_ENDED` rather than empty history.
+
+Production incognito remains host-owned until P7. P5b adds usage/projection
+composition, Memory reads, and public SDK Codex history. P5a changes no schema,
+retention, settlement owner, update behavior, or operator configuration, and
+retires no T1 sites before activation.
+
+### Incognito compute and usage (P5b, inactive)
+
+Usage reverse RPC and transcript reconciliation can use a captured actor and
+session generation. Each extraction and bounded publication takes its own FIFO
+turn; compute retains actor lifetime without holding that queue while awaiting
+another worker. SQL, source framing, refresh locks, and projection claims remain
+on the actor. Usage inventory preserves explicit selections and discovery cutoffs.
+
+Caller authority is rechecked before disclosure and at transaction and commit
+grants. Compute scopes own distinct source identities and lock tokens. Revocation
+refuses results while exact cleanup drains accepted work and removes unfinished
+projection chunks; releasing a borrow still joins its cleanup. Actor loss returns
+`INCOGNITO_SESSION_ENDED` without replay or a replacement database.
+
+These routes remain inactive until P7. Production incognito stays host-owned;
+schemas, retention, durability, update behavior, and operator configuration are
+unchanged, and no T1 sites are retired. P5c adds Memory and Codex history adapters.
+
 ### Existing worker flows
 
 Shared-state transaction diagnostics inherit the executing worker command name
@@ -249,6 +295,20 @@ Incognito, maintenance, opaque plugin callbacks, and unclassified internal guard
 retain native transactions and yielding writer admission. Arbitrary async plugin
 updaters retain their existing nested-admission behavior. Schemas, durability,
 public callback contracts, and update behavior are unchanged.
+
+Durable transcript turns append messages, consume pending inputs, evaluate typed
+latest-assistant and active-entry predicates, update entries, and commit goal
+receipts in one agent-executor transaction. Host preparation uses worker-read
+idempotency facts; the transaction rechecks those facts before applying prepared
+messages. Runtime target selection uses the existing history reader, retaining
+the captured store, canonical session key, and selected lifecycle.
+Acknowledged custody and final transcript cursors install before row
+observers, then identity and message-completion callbacks settle within the same
+physical writer FIFO. Lost replies reconcile through the existing entry-patch
+transfer and native COMMIT receipt; uncertain outcomes never replay. Opaque
+released SDK callbacks and dependent callback batches retain their synchronous
+transaction visibility, and process-held incognito retains its existing owner. Reset remains a separate
+cutover. This changes no schema, durability, retention, or update behavior.
 
 Channel setup awaits a fresh policy read after the agent-selection prompt.
 Deferred plugin migration rows are read by the shared-state worker, and setup
@@ -528,6 +588,17 @@ owners, so a nested scope cannot close an executor retained by its parent.
 
 ## Carry facts, publish after commit
 
+Sandbox-browser workspace reservations, activity/port upserts, and browser row
+removal use the existing shared-state writer. Exact-generation retirement shares
+that queue and validates the inspected allocation inside its transaction. Each command captures its database
+and input before yielding; the worker rereads the current row and preserves its
+creation and image fields. Removal shares the writer FIFO so an earlier queued
+activity update cannot restore a removed row. Browser allocation awaits the
+reservation, and transaction/commit grants retain the live workspace assertion.
+That assertion still performs the existing synchronous session and worktree
+authority reads; those other owners remain separate migration work. Schemas,
+stored bytes, retention, and update behavior are unchanged.
+
 Workspace snapshots and conditional alias registration, first-writer setup merges,
 and exact expired-state deletion use the shared-state writer. Read-only snapshots
 retain the existing reader. The host captures the physical database and filesystem
@@ -601,6 +672,17 @@ journal and final-verification ordering, then awaits durable pointer publication
 Commit receipts
 invalidate pending-result read observations without revoking separate turn
 claims; uncertain writes retain recovery custody and are not replayed.
+
+Workspace-result claim continuation, acceptance, cancellation, recovery handoff,
+and completion use the same placement writer. Pending-result listings use the
+existing shared-state reader. The placement authority owner prepares exact result
+facts and publishes acknowledged postimages before observers; synchronous
+filesystem guards consume those revocable facts. Acceptance still records the
+accepted result and removes its applied journal atomically. Lost replies retain
+known committed receipts, while unknown outcomes block further effects without
+authorizing inverse file changes or replay. Provider shutdown joins handoff before
+revoking the original environment. Schemas, retention, durability, and update
+behavior are unchanged.
 
 Workspace reconciliation journal reads use the shared-state reader, and journal
 creation, cleanup, orphan pruning, and manifest acceptance use the existing
@@ -942,6 +1024,15 @@ The host captures the physical source before yielding and rechecks its admission
 before returning the result. Cold archives retain their existing restoration
 owner. Native transaction callbacks and process-held incognito transcripts retain
 their synchronous reader; worker failures never fall back to host disk reads.
+
+Awaited full-transcript event reads use the same history worker's hydration stream.
+Compaction preflight, reset hooks, BTW context, exports, and the asynchronous SDK
+reader retain raw event order, read fences, and byte limits. The host captures the
+physical store before discovery yields and keeps its read custody through cold
+restoration and transfer cleanup. Incognito and the released synchronous SDK
+reader retain their native owners. Transaction-held scans for rewind, forks, and
+reset boundaries, plus session-memory capture, remain separate migration work.
+This changes no schema, stored bytes, retention, or update behavior.
 
 The asynchronous transcript-search facade similarly moves durable FTS reads for
 all four Gateway/tool callers through the existing worker lifecycle. Each caller
