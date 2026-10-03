@@ -1331,6 +1331,7 @@ jobs:
       pull-requests: read
     uses: ./.github/workflows/openclaw-live-and-e2e-checks-reusable.yml
     with: &docker_acceptance_inputs
+      use_github_hosted_runners: true
       runner_group: ${{ inputs.runner_group }}
       ref: ${{ needs.resolve_package.outputs.package_source_sha }}
       include_repo_e2e: false
