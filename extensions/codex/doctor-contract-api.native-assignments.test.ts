@@ -649,7 +649,9 @@ describe("Codex native Task assignment upgrade", () => {
         db.prepare("DELETE FROM task_runs WHERE task_id = ?").run("selected");
       }
       try {
-        await expect(migration.migrateLegacyState(fixture.params)).rejects.toThrow(/changed|missing/);
+        await expect(migration.migrateLegacyState(fixture.params)).rejects.toThrow(
+          /changed|missing/,
+        );
       } finally {
         if (change === "database") {
           // Native worker settlement still owns the original database identity.
