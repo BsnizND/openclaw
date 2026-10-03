@@ -29,6 +29,7 @@ import {
   onGatewaySuspendAdmissionChange,
   runWithRetainedGatewayRootWork,
 } from "../process/gateway-work-admission.js";
+import { onSessionReaction } from "../sessions/reaction-events.js";
 import {
   onSessionIdentityMutation,
   onSessionLifecycleEvent,
@@ -667,7 +668,14 @@ export function startGatewayEventSubscriptions(params: {
   const unsubscribeSuspension = onGatewaySuspendAdmissionChange((phase) => {
     params.broadcast("gateway.suspension", { phase });
   });
+  const reactionUnsub = onSessionReaction((event) => {
+    params.broadcast("session.reaction", event, {
+      sessionKeys: [event.sessionKey],
+      agentId: event.agentId,
+    });
+  });
   const lifecycleUnsub = () => {
+    reactionUnsub();
     unsubscribeSessionIdentity();
     unsubscribeSuspension();
     unsubscribeProfileChanges();

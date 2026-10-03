@@ -4,6 +4,10 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import type { ScheduledToolPolicyContext } from "../agents/scheduled-tool-policy.js";
 import type { InternalChannelThreadingToolContext } from "../channels/threading-tool-context-internal.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  getAgentRunContext,
+  validateAgentRunDelegatedAuthority,
+} from "../infra/agent-run-registry.js";
 import { pruneMapToMaxSize } from "../infra/map-size.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import {
@@ -36,8 +40,11 @@ export type DashboardMessageReadAdmission = Readonly<{
 }>;
 
 export type MessageActionAuthorization = {
+  /** Host-only closure for a native durable action; never forwarded as model data. */
+  assertCurrentTurn?: (scope: { agentId: string; sessionKey: string; sessionId: string }) => void;
   requesterAccountId?: string;
   requesterSenderId?: string;
+  currentSessionMessageId?: string;
   toolContext?: InternalChannelThreadingToolContext;
   /** @internal Redeemed from the process-local turn capability. */
   scheduled?: ScheduledMessageActionAuthority;
@@ -58,6 +65,8 @@ type AgentRuntimeMessageActionContextBase = MessageActionRequesterIdentity & {
   /** Process-local owner reference revalidated before privileged Gateway use. */
   turnCapability?: string;
   sessionId?: string;
+  /** Persisted prompt ID from the exact admitted native transcript instance. */
+  currentSessionMessageId?: string;
   /** Durable session entry that owns restart-recovery receipt state. */
   sourceReplySessionKey?: string;
   toolContext?: InternalChannelThreadingToolContext;
@@ -180,6 +189,7 @@ export function mintMessageActionTurnCapability(params: {
   sessionKey: string;
   sourceReplySessionKey?: string;
   sessionId?: string;
+  currentSessionMessageId?: string;
   requesterAccountId?: string;
   requesterSenderId?: string;
   requesterSenderName?: string;
@@ -212,6 +222,7 @@ export function mintMessageActionTurnCapability(params: {
       ? RUN_LIFETIME_EXPIRES_AT_MS
       : nowMs + resolveTtlMs(params.ttlMs),
     sessionId: normalizeOptionalString(params.sessionId),
+    currentSessionMessageId: normalizeOptionalString(params.currentSessionMessageId),
     sourceReplySessionKey: normalizeOptionalString(params.sourceReplySessionKey),
     requesterAccountId: normalizeOptionalString(params.requesterAccountId),
     requesterSenderId: normalizeOptionalString(params.requesterSenderId),
@@ -311,6 +322,7 @@ function copyMessageActionTurnContext(
   return {
     expiresAtMs: capability.expiresAtMs,
     sessionId: capability.sessionId,
+    currentSessionMessageId: capability.currentSessionMessageId,
     sourceReplySessionKey: capability.sourceReplySessionKey,
     ...selectMessageActionRequesterIdentity(capability),
     toolContext: copyToolContext(capability.toolContext),
@@ -322,9 +334,27 @@ export function resolveMessageActionTurnAuthorization(
   params: MessageActionTurnCapabilityLookup,
 ): (AgentRuntimeMessageActionContext & MessageActionAuthorization) | undefined {
   const capability = resolveStoredMessageActionTurnCapability(params);
+  const runContext = capability ? getAgentRunContext(capability.runId) : undefined;
+  const runAuthority = runContext?.delegatedAuthority;
   return capability
     ? {
         ...copyMessageActionTurnContext(capability),
+        assertCurrentTurn: (scope) => {
+          if (
+            resolveStoredMessageActionTurnCapability({ ...params, nowMs: undefined }) !==
+              capability ||
+            capability.agentId !== scope.agentId ||
+            capability.sessionKey !== scope.sessionKey ||
+            capability.sessionId !== scope.sessionId ||
+            !runContext ||
+            getAgentRunContext(capability.runId) !== runContext ||
+            !runAuthority ||
+            !validateAgentRunDelegatedAuthority(runAuthority)
+          ) {
+            throw new Error("message action current-turn authority is no longer active");
+          }
+          capability.assertDashboardReadCurrent?.();
+        },
         scheduled: capability.scheduled,
         assertDashboardReadCurrent: capability.assertDashboardReadCurrent,
       }

@@ -1,4 +1,3 @@
-// Gateway Protocol schema module defines protocol validation shapes.
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { Static } from "typebox";
@@ -11,6 +10,8 @@ import {
 } from "./chat-history-constants.js";
 import { closedObject } from "./closed-object.js";
 import { HumanMentionsSchema } from "./human-mentions.js";
+// Gateway Protocol schema module defines protocol validation shapes.
+import { NativeSessionReactionCompletionSchema } from "./native-session-reaction-completion.js";
 import { ChatSendSessionKeyString, InputProvenanceSchema, NonEmptyString } from "./primitives.js";
 import { SessionPermissionModeSchema, SessionToolOverridesSchema } from "./sessions-row.js";
 
@@ -410,6 +411,7 @@ export const ChatDeltaEventSchema = closedObject({
 export const ChatFinalEventSchema = closedObject({
   ...ChatEventBaseSchema,
   state: Type.Literal("final"),
+  nativeSessionReactionCompletion: Type.Optional(NativeSessionReactionCompletionSchema),
   message: Type.Optional(Type.Unknown()),
   usage: Type.Optional(Type.Unknown()),
   stopReason: Type.Optional(Type.String()),

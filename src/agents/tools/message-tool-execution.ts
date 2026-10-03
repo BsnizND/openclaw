@@ -56,6 +56,7 @@ import {
   buildMessageToolDeliveryFingerprint,
   normalizeMessageToolIdempotencyKeyPart,
 } from "./message-tool-idempotency.js";
+import { recordMessageToolReactionCompletion } from "./message-tool-reaction-completion.js";
 import {
   projectScheduledMessageActionPartialResult,
   shouldRevalidateCompletedMessageAction,
@@ -659,6 +660,9 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
             accountId,
             currentAccountId: agentAccountId,
             sessionKey: options?.agentSessionKey,
+            sessionId: options?.sessionId,
+            agentId: resolvedAgentId,
+            currentSessionMessageId: trustedTurnContext?.currentSessionMessageId,
             toolContext,
             deliveredPayload: result.payload,
             sourceReplyFinal: requestedSourceReplyFinal,
@@ -696,6 +700,11 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
             currentSourceReply
           ) {
             messageDelivery.sourceReplyDelivered = true;
+            messageDelivery.nativeSessionReactionCompletion = recordMessageToolReactionCompletion(
+              action,
+              toolResult?.details,
+              deliveryRunId,
+            );
           }
           if (
             action === "poll-vote" &&

@@ -5,6 +5,7 @@ import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-ke
 import { projectChatDisplayMessage } from "../chat-display-projection.js";
 import { capLiveAssistantText } from "../live-chat-projector.js";
 import type { GatewayBroadcastOpts } from "../server-broadcast-types.js";
+import { projectNativeReactionChatCompletion } from "../server-chat-terminal-message.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "../session-request-agent.js";
 import type { GatewayRequestContext } from "./types.js";
 
@@ -137,6 +138,15 @@ function broadcastChatFrame(
         ? {
             state: params.state,
             message: projectChatDisplayMessage(params.message),
+            ...(params.state === "final"
+              ? projectNativeReactionChatCompletion({
+                  jobState: "done",
+                  sessionKey: params.sessionKey,
+                  clientRunId: params.runId,
+                  sourceRunId: params.runId,
+                  agentId: params.agentId,
+                })
+              : {}),
             ...(params.stopReason ? { stopReason: params.stopReason } : {}),
           }
         : {

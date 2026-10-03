@@ -13,6 +13,8 @@ export type AgentRunContext = {
   providerReviewTerminal?: import("../sessions/provider-review-terminal.js").ProviderReviewTerminalFact;
   /** Queued reply delivery, rather than runtime execution, owns chat completion. */
   completionSource?: "reply-dispatch";
+  /** Presentation copy of the persisted host delivery fact; never mutation authority. */
+  nativeSessionReactionCompletion?: import("../../packages/gateway-protocol/src/index.js").NativeSessionReactionCompletion;
   sessionKey?: string;
   /** Resolved agent owner, including for unscoped session keys. */
   agentId?: string;

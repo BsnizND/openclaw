@@ -76,6 +76,10 @@ import type {
   SessionMessageSubscriberRegistry,
   ToolEventRecipientRegistry,
 } from "./server-chat-state.js";
+import {
+  createTerminalChatMessage,
+  projectNativeReactionChatCompletion,
+} from "./server-chat-terminal-message.js";
 import { roundedChatSendTimingMs } from "./server-methods/chat-server-timing.js";
 import { hasSessionChangeReceivers } from "./session-change-receivers.js";
 import { buildGatewaySessionSnapshot } from "./session-event-payload.js";
@@ -1067,23 +1071,11 @@ export function createAgentEventHandler({
       ...(spawnedBy && { spawnedBy }),
       seq,
     };
-    const createTerminalMessage = (canvasBlocks: NonNullable<ChatRunRecord["canvasBlocks"]>) =>
-      appendChatCanvasBlocksToMessage(
-        {
-          role: "assistant",
-          content: text ? [{ type: "text", text }] : [],
-          timestamp: Date.now(),
-          ...(opts?.assistantTranscriptIdempotencyKey
-            ? {
-                __openclaw: {
-                  runId: clientRunId,
-                  idempotencyKey: opts.assistantTranscriptIdempotencyKey,
-                },
-              }
-            : {}),
-        },
-        canvasBlocks,
-      );
+    const createTerminalMessage = createTerminalChatMessage(
+      text,
+      clientRunId,
+      opts?.assistantTranscriptIdempotencyKey,
+    );
     if (jobState !== "error") {
       const run = chatRunState.runs.get(clientRunId);
       const canvasBlocks = run?.canvasBlocks ?? [];
@@ -1099,6 +1091,13 @@ export function createAgentEventHandler({
         ...(jobState === "aborted" && opts?.abortErrorMessage
           ? { errorMessage: opts.abortErrorMessage }
           : {}),
+        ...projectNativeReactionChatCompletion({
+          jobState,
+          sessionKey,
+          clientRunId,
+          sourceRunId,
+          agentId: opts?.agentId,
+        }),
         ...(stopReason && { stopReason }),
         ...(jobState === "done" && opts?.yielded ? { yielded: true as const } : {}),
         message:

@@ -41,6 +41,7 @@ type SourceReplyTranscriptMirrorParams = {
   sessionKey?: string;
   sessionId?: string;
   agentId?: string;
+  currentSessionMessageId?: string;
   toolContext?: InternalChannelThreadingToolContext;
   idempotencyKey?: string;
   sourceReplyFinal?: boolean;
@@ -485,6 +486,29 @@ function resolveDeliveredCurrentSourceReply(
   params: SourceReplyTranscriptMirrorParams,
   allowAsync: boolean,
 ): SourceReplyMatch {
+  const native = asRecord(asRecord(params.deliveredPayload)?.nativeSessionReaction);
+  if (params.action === "react" && native) {
+    const delivery = projectPluginMessageDeliveryFact(params.deliveredPayload);
+    if (delivery?.status !== "settled" || delivery.partialDelivery) {
+      return false;
+    }
+    return (
+      // SAFETY: the message action caller supplies its resolved, registered channel ID.
+      getChannelPlugin(params.channel as ChannelId)?.capabilities.nativeSessionReactions === true &&
+      params.sourceReplyFinal === true &&
+      params.actionParams.remove !== true &&
+      native.changed === true &&
+      native.remove === false &&
+      native.agentId === params.agentId &&
+      native.sessionKey === params.sessionKey &&
+      native.sessionId === params.sessionId &&
+      Boolean(params.currentSessionMessageId) &&
+      native.messageId === params.currentSessionMessageId &&
+      (!params.actionParams.messageId ||
+        native.messageId === normalizeOptionalString(params.actionParams.messageId)) &&
+      native.emoji === normalizeOptionalString(params.actionParams.emoji)
+    );
+  }
   const deliveryFact = projectPluginMessageDeliveryFact(params.deliveredPayload);
   if (
     (deliveryFact && deliveryFact.status !== "settled") ||

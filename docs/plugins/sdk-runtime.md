@@ -390,3 +390,52 @@ provides non-creating inspection of that owner's retained receipts during ordina
 Doctor detection. Retained receipts have no TTL or count eviction. Recovery does not
 certify readiness itself: the normal migration owner must inspect the resulting state
 and settle every remaining required obligation before completion is recorded.
+
+### Native session reactions
+
+`openclaw/plugin-sdk/session-reaction-runtime` exports
+`reactToCurrentSessionMessage(context, { messageId, emoji, remove? })` and
+`isReactionEmoji`. The host supplies `context.sessionReactions` version 1 only
+for a delegated `react` action in a live current agent session when the channel
+declares `capabilities.nativeSessionReactions: true`. This declaration targets
+the native store; it does not require or grant platform conversation write
+authority. The helper
+returns the committed `{ messageId, reactions, changed }`; an unavailable or
+closed capability rejects. Retained callbacks cannot write after the plugin
+invocation or its run authority ends.
+
+The host derives the actor (`agent:<agentId>`), label, store, and transcript
+instance. Input cannot select an actor or another session. Agent writes use
+the same worker-owned reaction table and `session.reaction` event as human
+writes, without a human system notice, agent wake, channel mirror, or new
+transcript message. Repeated desired-state writes are idempotent.
+
+A current prompt's canonical ID is available as
+`context.sessionReactions.currentMessageId` only after a matching native
+admission receipt. Channel transport message IDs are different identities.
+Explicit earlier targets use `__openclaw.id` from the supported
+`sessions_history` result; the native writer verifies current membership.
+Browser writers should supply `expectedSessionId` to `session.reactions.set`
+so a reset rejects the old transcript instance through commit. Reaction lists
+include `viewer` only when the connection has an admitted native human profile.
+
+For an explicitly terminal (`final: true`) reaction, the host stamps the
+committed native receipt. An addition to the admitted current prompt can
+complete the source reply without text. Removal, a no-op, or a reaction to
+another saved message cannot do so. Plugin output cannot supply that receipt.
+
+The successful native `chat.final` carries `nativeSessionReactionCompletion`
+when that admitted prompt was fulfilled by the reaction. It contains `runId`,
+`sessionKey`, `agentId`, `sessionId`, `messageId`, `emoji`, and the native agent
+`actor`. The final event's `runId` is the same admitted client correlation as
+its outer frame; `executionRunId` is present when the engine run differs.
+`sourceIdempotencyKey`, when present, is the exact saved user admission key.
+
+For reconnect or uncertain-send recovery, call `session.reactions.list` with
+`completionMessageIds` (up to 50 canonical saved user IDs). Its `completions`
+array reads the existing persisted host tool-delivery facts, independently of
+live process memory and display truncation. Each fact must still belong to the
+active transcript branch, current reset window, same session instance, and
+exact saved user admission. Gateway user keys are `${clientRunId}:user`; the
+durable fact retains this source `runId` and the engine `executionRunId` when
+different. Neither reaction events nor adapter success alone prove completion.

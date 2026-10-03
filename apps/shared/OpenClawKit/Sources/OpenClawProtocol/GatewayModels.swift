@@ -3997,6 +3997,7 @@ public struct ChatFinalEvent: Codable, Sendable {
     public let spawnedby: String?
     public let seq: Int
     public let state: String
+    public let nativesessionreactioncompletion: NativeSessionReactionCompletion?
     public let message: AnyCodable?
     public let usage: AnyCodable?
     public let stopreason: String?
@@ -4009,6 +4010,7 @@ public struct ChatFinalEvent: Codable, Sendable {
         spawnedby: String? = nil,
         seq: Int,
         state: String,
+        nativesessionreactioncompletion: NativeSessionReactionCompletion? = nil,
         message: AnyCodable? = nil,
         usage: AnyCodable? = nil,
         stopreason: String? = nil,
@@ -4020,6 +4022,7 @@ public struct ChatFinalEvent: Codable, Sendable {
         self.spawnedby = spawnedby
         self.seq = seq
         self.state = state
+        self.nativesessionreactioncompletion = nativesessionreactioncompletion
         self.message = message
         self.usage = usage
         self.stopreason = stopreason
@@ -4033,6 +4036,7 @@ public struct ChatFinalEvent: Codable, Sendable {
         case spawnedby = "spawnedBy"
         case seq
         case state
+        case nativesessionreactioncompletion = "nativeSessionReactionCompletion"
         case message
         case usage
         case stopreason = "stopReason"
@@ -8868,6 +8872,22 @@ public struct MessageActionParams: Codable, Sendable {
     }
 }
 
+public struct MessageReactionSummary: Codable, Sendable {
+    public let emoji: String
+    public let count: Int
+    public let identities: [[String: AnyCodable]]
+
+    public init(
+        emoji: String,
+        count: Int,
+        identities: [[String: AnyCodable]])
+    {
+        self.emoji = emoji
+        self.count = count
+        self.identities = identities
+    }
+}
+
 public struct MessageSendApprovalScope: Codable, Sendable {
     public let kind: String
     public let target: String
@@ -9407,6 +9427,52 @@ public struct ModelsProbeTargetResult: Codable, Sendable {
         case status
         case latencyms = "latencyMs"
         case error
+    }
+}
+
+public struct NativeSessionReactionCompletion: Codable, Sendable {
+    public let runid: String
+    public let executionrunid: String?
+    public let sourceidempotencykey: String?
+    public let sessionkey: String
+    public let agentid: String
+    public let sessionid: String
+    public let messageid: String
+    public let emoji: String
+    public let actor: [String: AnyCodable]
+
+    public init(
+        runid: String,
+        executionrunid: String? = nil,
+        sourceidempotencykey: String? = nil,
+        sessionkey: String,
+        agentid: String,
+        sessionid: String,
+        messageid: String,
+        emoji: String,
+        actor: [String: AnyCodable])
+    {
+        self.runid = runid
+        self.executionrunid = executionrunid
+        self.sourceidempotencykey = sourceidempotencykey
+        self.sessionkey = sessionkey
+        self.agentid = agentid
+        self.sessionid = sessionid
+        self.messageid = messageid
+        self.emoji = emoji
+        self.actor = actor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case runid = "runId"
+        case executionrunid = "executionRunId"
+        case sourceidempotencykey = "sourceIdempotencyKey"
+        case sessionkey = "sessionKey"
+        case agentid = "agentId"
+        case sessionid = "sessionId"
+        case messageid = "messageId"
+        case emoji
+        case actor
     }
 }
 
@@ -15568,6 +15634,165 @@ public struct SessionPublicShareSetResult: Codable, Sendable {
         case ok
         case sessionkey = "sessionKey"
         case publicshare = "publicShare"
+    }
+}
+
+public struct SessionReactionEvent: Codable, Sendable {
+    public let sessionkey: String
+    public let agentid: String
+    public let sessionid: String
+    public let messageid: String
+    public let emoji: String
+    public let action: AnyCodable
+    public let actor: SessionSharingIdentity
+    public let reactions: [MessageReactionSummary]
+
+    public init(
+        sessionkey: String,
+        agentid: String,
+        sessionid: String,
+        messageid: String,
+        emoji: String,
+        action: AnyCodable,
+        actor: SessionSharingIdentity,
+        reactions: [MessageReactionSummary])
+    {
+        self.sessionkey = sessionkey
+        self.agentid = agentid
+        self.sessionid = sessionid
+        self.messageid = messageid
+        self.emoji = emoji
+        self.action = action
+        self.actor = actor
+        self.reactions = reactions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case agentid = "agentId"
+        case sessionid = "sessionId"
+        case messageid = "messageId"
+        case emoji
+        case action
+        case actor
+        case reactions
+    }
+}
+
+public struct SessionReactionMirror: Codable, Sendable {
+    public let status: AnyCodable
+    public let reason: String?
+
+    public init(
+        status: AnyCodable,
+        reason: String? = nil)
+    {
+        self.status = status
+        self.reason = reason
+    }
+}
+
+public struct SessionReactionsListParams: Codable, Sendable {
+    public let sessionkey: String
+    public let agentid: String?
+    public let completionmessageids: [String]?
+
+    public init(
+        sessionkey: String,
+        agentid: String? = nil,
+        completionmessageids: [String]? = nil)
+    {
+        self.sessionkey = sessionkey
+        self.agentid = agentid
+        self.completionmessageids = completionmessageids
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case agentid = "agentId"
+        case completionmessageids = "completionMessageIds"
+    }
+}
+
+public struct SessionReactionsListResult: Codable, Sendable {
+    public let completions: [NativeSessionReactionCompletion]?
+    public let viewer: SessionSharingIdentity?
+    public let sessionid: String
+    public let reactions: [String: AnyCodable]
+
+    public init(
+        completions: [NativeSessionReactionCompletion]? = nil,
+        viewer: SessionSharingIdentity? = nil,
+        sessionid: String,
+        reactions: [String: AnyCodable])
+    {
+        self.completions = completions
+        self.viewer = viewer
+        self.sessionid = sessionid
+        self.reactions = reactions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case completions
+        case viewer
+        case sessionid = "sessionId"
+        case reactions
+    }
+}
+
+public struct SessionReactionsSetParams: Codable, Sendable {
+    public let sessionkey: String
+    public let agentid: String?
+    public let expectedsessionid: String?
+    public let messageid: String
+    public let emoji: String
+    public let remove: Bool?
+
+    public init(
+        sessionkey: String,
+        agentid: String? = nil,
+        expectedsessionid: String? = nil,
+        messageid: String,
+        emoji: String,
+        remove: Bool? = nil)
+    {
+        self.sessionkey = sessionkey
+        self.agentid = agentid
+        self.expectedsessionid = expectedsessionid
+        self.messageid = messageid
+        self.emoji = emoji
+        self.remove = remove
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case agentid = "agentId"
+        case expectedsessionid = "expectedSessionId"
+        case messageid = "messageId"
+        case emoji
+        case remove
+    }
+}
+
+public struct SessionReactionsSetResult: Codable, Sendable {
+    public let messageid: String
+    public let reactions: [MessageReactionSummary]
+    public let mirror: SessionReactionMirror?
+
+    public init(
+        messageid: String,
+        reactions: [MessageReactionSummary],
+        mirror: SessionReactionMirror? = nil)
+    {
+        self.messageid = messageid
+        self.reactions = reactions
+        self.mirror = mirror
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case messageid = "messageId"
+        case reactions
+        case mirror
     }
 }
 

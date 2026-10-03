@@ -13,6 +13,7 @@ import type { AgentToolResult } from "./runtime/index.js";
 type EmbeddedMessageDeliveryFact = {
   status: "settled" | "suppressed" | "dryRun" | "failed";
   sourceReplyDelivered?: true;
+  nativeSessionReactionCompletion?: import("../../packages/gateway-protocol/src/index.js").NativeSessionReactionCompletion;
   primaryPlatformMessageId?: string;
   deliveredTargets?: string[];
   partialDelivery: boolean;

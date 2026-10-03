@@ -1235,6 +1235,10 @@
     "./plugin-sdk/session-key-runtime": {
       "default": "./dist/plugin-sdk/session-key-runtime.js"
     },
+    "./plugin-sdk/session-reaction-runtime": {
+      "types": "./dist/plugin-sdk/session-reaction-runtime.d.ts",
+      "default": "./dist/plugin-sdk/session-reaction-runtime.js"
+    },
     "./plugin-sdk/session-store-runtime": {
       "types": "./dist/plugin-sdk/session-store-runtime.d.ts",
       "default": "./dist/plugin-sdk/session-store-runtime.js"

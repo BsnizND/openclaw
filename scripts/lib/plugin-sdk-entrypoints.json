@@ -242,6 +242,7 @@
   "session-catalog-runtime",
   "session-discussion",
   "session-key-runtime",
+  "session-reaction-runtime",
   "session-store-runtime",
   "session-transcript-runtime",
   "sqlite-runtime",

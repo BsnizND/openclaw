@@ -325,6 +325,15 @@ export function mintReplyMessageActionTurnCapability(
   if (!context.agentId || !sessionKey) {
     return undefined;
   }
+  const admission = (
+    turn.followupRun.userTurnTranscriptRecorder ?? turn.opts?.userTurnTranscriptRecorder
+  )?.getAdmissionReceipt();
+  const currentSessionMessageId =
+    admission?.agentId === context.agentId &&
+    admission.sessionKey === sessionKey &&
+    admission.sessionId === context.sessionId
+      ? admission.entryId
+      : undefined;
   if (!channelIngress) {
     // Queue options may come from another input. Match the original admission,
     // not opts.runId, which followup execution replaces with its own run ID.
@@ -342,6 +351,7 @@ export function mintReplyMessageActionTurnCapability(
       runId,
       sessionKey,
       sessionId: context.sessionId,
+      currentSessionMessageId,
       assertDashboardReadCurrent: dashboardAdmission.assertCurrent,
       expiresWithRun: true,
     });
@@ -356,6 +366,7 @@ export function mintReplyMessageActionTurnCapability(
     sessionKey,
     sourceReplySessionKey: context.sessionKey,
     sessionId: context.sessionId,
+    currentSessionMessageId,
     requesterAccountId: context.agentAccountId,
     requesterSenderId: sender.senderId,
     requesterSenderName: sender.senderName,

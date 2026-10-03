@@ -161,6 +161,33 @@ People presence is shared with operators who have read access (`operator.read`, 
 
 The Gateway also filters watched-session references for each recipient using `sessions.list` visibility rules, across connect snapshots, presence RPC responses, and events. Hidden or missing references are omitted without counts or placeholders. Opening someone's card never borrows that person's session access.
 
+## Reactions
+
+Clients can add and remove reactions on saved prompts and assistant replies with
+`session.reactions.set`, and read committed summaries with
+`session.reactions.list`. Reacting requires an identified native human profile
+and permission to send to the session or suggest in it. View-only operators
+cannot react. The list response includes the admitted `viewer` profile when
+available. Browser clients supply `expectedSessionId` to fence a selected
+transcript instance; resets invalidate old writes through commit.
+
+Each committed human addition or removal queues a separate system notice for
+the agent's next turn. No-op retries queue no notice. Reactions never wake the
+agent or create notifications. The native `session.reaction` event publishes
+committed side data; reactions do not rewrite transcript messages. A new
+transcript instance starts without the previous instance's reactions.
+
+Reactions on channel-origin prompts can mirror the bot's reaction to that
+channel. One-slot channels keep the newest remaining emoji when another emoji
+is removed. Assistant replies have no persisted delivered channel message ID
+and are not mirrored. A failed mirror remains a visible result without
+removing the committed native reaction.
+
+Channel plugins can use the host-bound current-turn agent writer in
+[Plugin SDK runtime](/plugins/sdk-runtime#native-session-reactions). Agent actors
+use the reserved `agent:<agentId>` namespace and share the same native table
+and event. They do not produce human system notices or mirror recursively.
+
 ## Mentioning people
 
 In the transcript, selected mentions show a small inline avatar beside the original name. Missing photos use initials. The badge omits the visible `@`, while copied text keeps it.

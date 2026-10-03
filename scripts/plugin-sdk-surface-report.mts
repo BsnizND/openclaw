@@ -187,20 +187,23 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
 } satisfies Record<string, number>);
 
 export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env) {
+  // Native session-reaction-runtime adds one public entrypoint, six named exports
+  // (three input/result/capability types, summary type, writer, emoji validation),
+  // and two callable exports. Other SDK growth still requires a contract decision.
   const budgets = {
     publicEntrypoints: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_ENTRYPOINTS",
-      158,
+      159,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS",
-      4591,
+      4597,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS",
-      2695,
+      2697,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

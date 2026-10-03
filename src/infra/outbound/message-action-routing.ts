@@ -347,15 +347,19 @@ export async function prepareMessageRoute(params: {
   ) {
     throw new Error(`Message action ${action} not supported for channel ${channel}.`);
   }
-  actionParams = normalizeMessageActionInput({
-    action,
-    args: actionParams,
-    toolContext: input.toolContext,
-    targetAliasSpec: channelPlugin?.actions?.messageActionTargetAliases?.[action] ?? null,
-    // Trusted direct operators retain opaque resource-id workflows. Native conversation
-    // aliases still normalize above and remain subject to the shared cross-context policy.
-    allowResourceOnly: input.conversationReadOrigin === "direct-operator",
-  });
+  const nativeReaction =
+    action === "react" && channelPlugin.capabilities.nativeSessionReactions === true;
+  actionParams = nativeReaction
+    ? { ...actionParams }
+    : normalizeMessageActionInput({
+        action,
+        args: actionParams,
+        toolContext: input.toolContext,
+        targetAliasSpec: channelPlugin?.actions?.messageActionTargetAliases?.[action] ?? null,
+        // Trusted direct operators retain opaque resource-id workflows. Native conversation
+        // aliases still normalize above and remain subject to the shared cross-context policy.
+        allowResourceOnly: input.conversationReadOrigin === "direct-operator",
+      });
   let accountId = explicitAccountId ?? input.defaultAccountId;
   if (!accountId && agentId) {
     accountId = resolveTargetBoundAccountId({
@@ -469,9 +473,12 @@ export async function resolveMessageTarget(params: {
   deferExternalTargetResolution?: boolean;
   plugin?: ChannelPlugin;
 }): Promise<ResolvedMessagingTarget | undefined> {
-  const resolvedTarget = params.deferExternalTargetResolution
-    ? undefined
-    : await resolveActionTarget(params);
+  const nativeReaction =
+    params.action === "react" && params.plugin?.capabilities.nativeSessionReactions === true;
+  const resolvedTarget =
+    nativeReaction || params.deferExternalTargetResolution
+      ? undefined
+      : await resolveActionTarget(params);
 
   enforceCrossContextPolicy({
     channel: params.channel,

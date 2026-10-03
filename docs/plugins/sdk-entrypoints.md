@@ -276,3 +276,7 @@ the native operation.
 Use the plugin approval timeout independently of the agent-run timeout. Authenticated
 Control UI reviewers can inspect `detail`, while channel messages retain
 the bounded description. Oversized detail is rejected by the existing request schema.
+
+`session-reaction-runtime` supplies the current-turn native reaction writer and
+single-emoji validation. It requires the host-bound version 1 capability on a
+channel action context; it does not grant a plugin independent store authority.

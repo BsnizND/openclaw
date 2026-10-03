@@ -10,6 +10,7 @@ import type { MarkdownTableMode } from "../../config/types.base.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { MessagePresentation } from "../../interactive/payload.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
+import type { CurrentSessionReactionCapabilityV1 } from "../../sessions/reaction-action.types.js";
 import type { ChatType } from "../chat-type.js";
 import type { InboundEventKind } from "../inbound-event/kind.js";
 import type { IdentifierAuthentication } from "../message-access/identifier-authentication.js";
@@ -275,6 +276,10 @@ export type ChannelCapabilities = {
   chatTypes: Array<ChatType | "thread">;
   polls?: boolean;
   reactions?: boolean;
+  /** react writes the current native session store through host-bound authority. */
+  nativeSessionReactions?: boolean;
+  /** Bot reactions per message; omitted means multiple independent emoji. */
+  reactionSlots?: "single" | "multiple";
   edit?: boolean;
   unsend?: boolean;
   reply?: boolean;
@@ -694,6 +699,8 @@ export type ChannelDirectoryEntry = {
 
 /** Execution context passed to channel-owned actions on the shared `message` tool. */
 export type ChannelMessageActionContext = {
+  /** Host-bound native store capability, present only on admitted delegated react actions. */
+  sessionReactions?: CurrentSessionReactionCapabilityV1;
   channel: ChannelId;
   action: ChannelMessageActionName;
   cfg: OpenClawConfig;

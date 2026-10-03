@@ -34,10 +34,12 @@ import type {
   SessionHistoryDelta,
   SessionHistoryTranscriptBinding,
   SessionHistorySnapshot,
+  SessionConversationBinding,
   SessionHistoryWorkerRequest,
   SessionHistoryWorkerResult,
 } from "./session-history-types.js";
 import { SessionHistoryDeltaPreparationError } from "./session-history-worker-errors.js";
+import type { StoredMessageReactionSummary } from "./session-reaction-store.types.js";
 import { isSessionTranscriptProjectionUnavailableError } from "./session-transcript-projection-error.js";
 import { resolveSessionTranscriptReadFence } from "./session-transcript-read-fence.js";
 import {
@@ -178,7 +180,19 @@ function captureHistoryRequest(request: SessionHistoryWorkerRequest): SessionHis
         },
       };
     }
-    if (request.kind === "message-count") {
+    if (request.kind === "reaction-completions") {
+      return {
+        kind: request.kind,
+        params: { target: capturedTarget, messageIds: [...request.params.messageIds] },
+      };
+    }
+    if (request.kind === "conversation-binding") {
+      return {
+        kind: request.kind,
+        params: { target: capturedTarget, conversationRef: request.params.conversationRef },
+      };
+    }
+    if (request.kind === "message-count" || request.kind === "reactions") {
       return { kind: request.kind, params: { target: capturedTarget } };
     }
     if (request.kind === "message-by-id") {
@@ -259,6 +273,20 @@ function captureHistoryRequest(request: SessionHistoryWorkerRequest): SessionHis
   };
 }
 
+export function readSessionHistoryPageInWorker(
+  request: Extract<SessionHistoryWorkerRequest, { kind: "reaction-completions" }>,
+  signal?: AbortSignal,
+): Promise<
+  import("../../../packages/gateway-protocol/src/index.js").NativeSessionReactionCompletion[]
+>;
+export function readSessionHistoryPageInWorker(
+  request: Extract<SessionHistoryWorkerRequest, { kind: "reactions" }>,
+  signal?: AbortSignal,
+): Promise<Record<string, StoredMessageReactionSummary[]>>;
+export function readSessionHistoryPageInWorker(
+  request: Extract<SessionHistoryWorkerRequest, { kind: "conversation-binding" }>,
+  signal?: AbortSignal,
+): Promise<SessionConversationBinding | null>;
 export function readSessionHistoryPageInWorker(
   request: Extract<SessionHistoryWorkerRequest, { kind: "artifacts" }>,
   signal?: AbortSignal,

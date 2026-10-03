@@ -13,6 +13,7 @@ import {
   redactSensitiveFieldValueWithConfig,
   redactToolPayloadTextWithConfig,
 } from "../logging/redact.js";
+import { readPersistedReactionCompletion } from "../sessions/reaction-completion.js";
 import { formatContextLimitTruncationNotice } from "./embedded-agent-runner/context-truncation-notice.js";
 import {
   DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS,
@@ -407,7 +408,26 @@ export function capToolResultForPersistence(
     return capped;
   }
   const details = capped.details;
-  const sanitizedDetails = sanitizeToolResultDetailsForPersistence(details, redactionConfig);
+  let sanitizedDetails = sanitizeToolResultDetailsForPersistence(details, redactionConfig);
+  const completion = readPersistedReactionCompletion(details);
+  if (completion) {
+    // Native admission IDs are operational facts, not adapter diagnostics. Preserve this bounded
+    // host receipt even when unrelated details are summarized or secret-redacted.
+    const retained = {
+      ...asOptionalObjectRecord(sanitizedDetails),
+      messageDelivery: {
+        status: "settled",
+        sourceReplyDelivered: true,
+        partialDelivery: false,
+        createdThreadIds: [],
+        nativeSessionReactionCompletion: completion,
+      },
+    };
+    sanitizedDetails =
+      jsonUtf8BytesOrInfinity(retained) <= MAX_PERSISTED_TOOL_RESULT_DETAILS_BYTES
+        ? retained
+        : { persistedDetailsTruncated: true, messageDelivery: retained.messageDelivery };
+  }
   return sanitizedDetails === details ? capped : { ...capped, details: sanitizedDetails };
 }
 
