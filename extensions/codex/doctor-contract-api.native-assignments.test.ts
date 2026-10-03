@@ -289,12 +289,13 @@ describe("Codex native Task assignment upgrade", () => {
       ]),
     );
     expect(assignments).toHaveLength(2);
+    const importMarker = {
+      version: 1,
+      taskIds: expect.arrayContaining(["legacy-initial", "legacy-followup"]),
+    };
     const importedState = await fixture.store.lookup(bindingKey);
     expect(importedState).toMatchObject({
-      nativeSubagentTaskImport: {
-        version: 1,
-        taskIds: expect.arrayContaining(["legacy-initial", "legacy-followup"]),
-      },
+      nativeSubagentTaskImport: importMarker,
     });
     await withEnvAsync({ OPENCLAW_STATE_DIR: fixture.params.stateDir }, async () => {
       const deliver = vi.fn(defaultNativeSubagentMonitorRuntime.deliverAgentHarnessCompletion);
@@ -388,48 +389,25 @@ describe("Codex native Task assignment upgrade", () => {
     await migration.migrateLegacyState(fixture.params);
     expect(fixture.runtime.readNativeSubagentAssignments!(identity, currentOwner)).toEqual([]);
 
-    await expect(fixture.runtime.mutate(identity, { kind: "clear" })).resolves.toBe(true);
-    const cleared = (await fixture.store.entries()).find((entry) => entry.key === bindingKey);
-    expect(cleared).toMatchObject({
-      value: {
-        state: "cleared",
-        nativeSubagentTaskImport: {
-          version: 1,
-          taskIds: expect.arrayContaining(["legacy-initial", "legacy-followup"]),
-        },
-      },
-    });
-    expect(cleared?.expiresAt).toBeUndefined();
-    await fixture.runtime.withLease(identity, async () => undefined);
-    await expect(fixture.store.lookup(bindingKey)).resolves.toMatchObject({
-      nativeSubagentTaskImport: {
-        version: 1,
-        taskIds: expect.arrayContaining(["legacy-initial", "legacy-followup"]),
-      },
-    });
-    await expect(fixture.runtime.mutate(identity, { kind: "set", binding })).resolves.toBe(true);
-    await migration.migrateLegacyState(fixture.params);
-    expect(fixture.runtime.readNativeSubagentAssignments!(identity, currentOwner)).toEqual([]);
-    await expect(fixture.runtime.resetSessionGeneration(identity)).resolves.toBe("applied");
-    const reset = (await fixture.store.entries()).find((entry) => entry.key === bindingKey);
-    expect(reset?.value).toMatchObject({
-      state: "cleared",
-      nativeSubagentTaskImport: {
-        version: 1,
-        taskIds: expect.arrayContaining(["legacy-initial", "legacy-followup"]),
-      },
-    });
-    expect(reset?.expiresAt).toBeUndefined();
-    await fixture.runtime.withLease(identity, async () => undefined);
-    await expect(fixture.store.lookup(bindingKey)).resolves.toMatchObject({
-      nativeSubagentTaskImport: {
-        version: 1,
-        taskIds: expect.arrayContaining(["legacy-initial", "legacy-followup"]),
-      },
-    });
-    await expect(fixture.runtime.mutate(identity, { kind: "set", binding })).resolves.toBe(true);
-    await migration.migrateLegacyState(fixture.params);
-    expect(fixture.runtime.readNativeSubagentAssignments!(identity, currentOwner)).toEqual([]);
+    for (const operation of ["clear", "reset"] as const) {
+      if (operation === "clear") {
+        await expect(fixture.runtime.mutate(identity, { kind: "clear" })).resolves.toBe(true);
+      } else {
+        await expect(fixture.runtime.resetSessionGeneration(identity)).resolves.toBe("applied");
+      }
+      const cleared = (await fixture.store.entries()).find((entry) => entry.key === bindingKey);
+      expect(cleared).toMatchObject({
+        value: { state: "cleared", nativeSubagentTaskImport: importMarker },
+      });
+      expect(cleared?.expiresAt).toBeUndefined();
+      await fixture.runtime.withLease(identity, async () => undefined);
+      await expect(fixture.store.lookup(bindingKey)).resolves.toMatchObject({
+        nativeSubagentTaskImport: importMarker,
+      });
+      await expect(fixture.runtime.mutate(identity, { kind: "set", binding })).resolves.toBe(true);
+      await migration.migrateLegacyState(fixture.params);
+      expect(fixture.runtime.readNativeSubagentAssignments!(identity, currentOwner)).toEqual([]);
+    }
     expect(fixture.rows()).toEqual(sourceRows);
   });
 
@@ -670,7 +648,18 @@ describe("Codex native Task assignment upgrade", () => {
       } else {
         db.prepare("DELETE FROM task_runs WHERE task_id = ?").run("selected");
       }
-      await expect(migration.migrateLegacyState(fixture.params)).rejects.toThrow(/changed|missing/);
+      try {
+        await expect(migration.migrateLegacyState(fixture.params)).rejects.toThrow(/changed|missing/);
+      } finally {
+        if (change === "database") {
+          // Native worker settlement still owns the original database identity.
+          // Restore the fault-injected source before reading bindings or cleanup.
+          await fs.rename(
+            path.join(fixture.params.stateDir, "state", "retained-source.sqlite"),
+            path.join(fixture.params.stateDir, "state", "openclaw.sqlite"),
+          );
+        }
+      }
       await expect(fixture.store.lookup(bindingKey)).resolves.toEqual(fixture.stored);
     },
   );

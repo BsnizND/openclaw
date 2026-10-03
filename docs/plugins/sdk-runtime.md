@@ -429,3 +429,9 @@ provides non-creating inspection of that owner's retained receipts during ordina
 Doctor detection. Retained receipts have no TTL or count eviction. Recovery does not
 certify readiness itself: the normal migration owner must inspect the resulting state
 and settle every remaining required obligation before completion is recorded.
+
+A retained recovery receipt can change how an existing row is interpreted without
+changing the SQLite schema. The recovery owner must document which core and plugin
+readers honor the receipt, how backups preserve receipt and source together, and
+whether an older reader can replay retired work. Numeric schema compatibility alone
+does not certify that recovery contract.

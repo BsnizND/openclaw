@@ -114,9 +114,17 @@ are refused before the receipt is written. A different selected scope or reason 
 replace the receipt; changed source is refused for inspection. Repeating the same
 request is idempotent. Keep this retirement-capable core and Codex owner together
 until an upstream version recognizes the same receipt contract or provides a supported
-transfer; reverting to a reader that ignores receipts could replay abandoned work.
-Normal migration inspection must still certify all remaining
-plugin state before the existing readiness guard clears.
+transfer. A binary-only downgrade to a core or Codex reader that ignores receipts is
+unsupported: it can import abandoned work when original ownership matches again.
+Matching SQLite schema versions do not establish receipt compatibility.
+
+Before retirement, retain a verified backup and its matching core and plugin versions.
+Restoring that pre-retirement backup restores the original pending obligations too;
+it does not preserve the later retirement decision. To preserve retirement during
+recovery, restore the receipt and original source together with receipt-aware readers.
+Do not copy a receipt into different source state or delete it to force readiness.
+Normal migration inspection must still certify all remaining plugin state before the
+existing readiness guard clears.
 
 ## Registry
 
