@@ -326,13 +326,20 @@ presented as child-provided data using the same escaping as completion results. 
 notice is distinct from a completion and uses the requester's existing message
 queue policy if it is already running. It does not resume the child: send the
 continuation with `sessions_send` to the named child session. Yielding again in
-the requester does not repeat an already delivered pause notice.
+the requester does not repeat an already delivered pause notice. A default
+follow-up already admitted on the child's session while the child was still
+yielding continues it instead, so no notice is sent. A follow-up with its own
+requester stays a separate sibling and leaves the notice in place.
 
 A plugin can then continue that same run
 by calling `api.runtime.subagent.run` with the paused `sessionKey`, instead of
 starting a sibling. The requester is announced once such a follow-up finishes
 normally; a follow-up that yields again with `waitFor: "message"` leaves the run
 paused and sends a new continuation-needed notice.
+This also applies to a default-delivery plugin follow-up admitted while the
+child is still finishing its yielding turn: when the pause publishes, the
+follow-up takes over the requester's completion, and the requester is announced
+once that follow-up finishes.
 
 A yield claim belongs to the turn that spawned the children. When a later turn
 of the same session calls `sessions_yield` while children spawned by an earlier
