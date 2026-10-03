@@ -49,6 +49,12 @@ export function createMessageToolTurnAuthority(params: {
     },
     beginInvocation: (action: string) => {
       const authorization = resolve();
+      const nativeReactionOnly =
+        authorization?.assertNativeSessionReactionCurrent &&
+        !authorization.assertDashboardReadCurrent;
+      if (nativeReactionOnly && action !== "react") {
+        throw new Error("This current-turn authority permits native session reactions only");
+      }
       const isRead = isFencedProviderReadAction(action);
       const dashboardRead = authorization?.assertDashboardReadCurrent;
       const admitScheduled = authorization?.scheduled && params.admitScheduledInvocation;
@@ -58,7 +64,9 @@ export function createMessageToolTurnAuthority(params: {
       return {
         authorization,
         config: admitScheduled ? admitScheduled() : params.getConfig(),
-        hasChannelTurnContext: Boolean(authorization && !authorization.scheduled && !dashboardRead),
+        hasChannelTurnContext: Boolean(
+          authorization && !authorization.scheduled && !dashboardRead && !nativeReactionOnly,
+        ),
         gatewayTurnCapability: dashboardRead && !isRead ? undefined : token,
         scheduledRead: isRead ? authorization?.scheduled : undefined,
         assertDashboardReadCurrent: isRead ? dashboardRead : undefined,

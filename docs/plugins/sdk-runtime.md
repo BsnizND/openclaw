@@ -399,7 +399,14 @@ and settle every remaining required obligation before completion is recorded.
 for a delegated `react` action in a live current agent session when the channel
 declares `capabilities.nativeSessionReactions: true`. This declaration targets
 the native store; it does not require or grant platform conversation write
-authority. The helper
+authority. An ordinary external user turn from a paired, authenticated human UI
+can admit this reaction-only capability. Its explicit return route, if present,
+must name the same canonical session and a loaded native-reaction channel;
+provenance, routing text, and display names cannot grant it. Backend, CLI,
+system, scheduled, reconnect, and cross-session inputs cannot acquire it. It
+does not grant first-party dashboard provider reads. The native admission
+rechecks caller credentials, session membership, and the original transcript
+instance through the current-turn owner. The helper
 returns the committed `{ messageId, reactions, changed }`; an unavailable or
 closed capability rejects. Retained callbacks cannot write after the plugin
 invocation or its run authority ends.

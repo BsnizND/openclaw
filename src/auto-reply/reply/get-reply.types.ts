@@ -59,6 +59,8 @@ type InternalReplySessionOptions = {
   cronCreatorAuthorityCapability?: CronCreatorAuthorityCapability;
   /** Current external dashboard turn only; never persisted or inherited by another run. */
   dashboardReadAdmission?: DashboardMessageReadAdmission;
+  /** Reaction-only authority from a paired human UI; never grants provider reads. */
+  nativeSessionReactionAdmission?: DashboardMessageReadAdmission;
   expectedExistingSessionId?: string;
   /** Retained predecessor evidence; reply admission must verify its session lineage and store. */
   expectedActiveReplyOperation?: ReplyOperation;

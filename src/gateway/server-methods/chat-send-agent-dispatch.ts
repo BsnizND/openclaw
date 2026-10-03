@@ -66,6 +66,7 @@ export function startChatDispatch(params: StartChatDispatchParams): void {
     skillLibraryAuthoring,
     cronCreatorAuthority,
     assertDashboardReadCurrent,
+    assertNativeSessionReactionCurrent,
     externalAuthorityAdmission,
     injection,
     request,
@@ -252,18 +253,23 @@ export function startChatDispatch(params: StartChatDispatchParams): void {
           : operation(),
       ),
   };
-  const dashboardReadAdmission = assertDashboardReadCurrent
-    ? {
-        agentId,
-        runId: clientRunId,
-        sessionKey,
-        // Fresh-session initialization updates this original registration's SID.
-        get sessionId() {
-          return sessionBinding.sessionId;
-        },
-        assertCurrent: assertDashboardReadCurrent,
-      }
-    : undefined;
+  const bindMessageActionAdmission = (assertCurrent: (() => void) | undefined) =>
+    assertCurrent
+      ? {
+          agentId,
+          runId: clientRunId,
+          sessionKey,
+          // Fresh-session initialization updates this original registration's SID.
+          get sessionId() {
+            return sessionBinding.sessionId;
+          },
+          assertCurrent,
+        }
+      : undefined;
+  const dashboardReadAdmission = bindMessageActionAdmission(assertDashboardReadCurrent);
+  const nativeSessionReactionAdmission = bindMessageActionAdmission(
+    assertNativeSessionReactionCurrent,
+  );
   const dispatch = replyDispatch
     .runAgentMediaTranscript(dispatchAdmission, () =>
       measureDiagnosticsTimelineSpan(
@@ -333,6 +339,7 @@ export function startChatDispatch(params: StartChatDispatchParams): void {
                 operatorAuthority: admission.operatorAuthority,
                 providerReviewAcknowledgment: request.providerReviewAcknowledgment,
                 dashboardReadAdmission,
+                nativeSessionReactionAdmission,
                 skillWorkshopProposalRevision,
                 skillLibraryAuthoring,
                 ...(cronCreatorAuthority

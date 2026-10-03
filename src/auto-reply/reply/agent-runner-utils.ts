@@ -308,10 +308,12 @@ export function mintReplyMessageActionTurnCapability(
 ): string | undefined {
   const channelIngress = isTrustedMessageActionTurnIngress(turn.sessionCtx.Provider);
   const dashboardAdmission = turn.opts?.dashboardReadAdmission;
+  const nativeReactionAdmission = turn.opts?.nativeSessionReactionAdmission;
+  const gatewayAdmission = dashboardAdmission ?? nativeReactionAdmission;
   if (
     turn.isHeartbeat ||
     (!channelIngress &&
-      (turn.sessionCtx.Provider !== "webchat" || dashboardAdmission?.runId !== runId))
+      (turn.sessionCtx.Provider !== "webchat" || gatewayAdmission?.runId !== runId))
   ) {
     return undefined;
   }
@@ -338,21 +340,22 @@ export function mintReplyMessageActionTurnCapability(
     // Queue options may come from another input. Match the original admission,
     // not opts.runId, which followup execution replaces with its own run ID.
     if (
-      !dashboardAdmission ||
-      dashboardAdmission.agentId !== context.agentId ||
-      dashboardAdmission.sessionKey !== sessionKey ||
-      dashboardAdmission.sessionId !== context.sessionId
+      !gatewayAdmission ||
+      gatewayAdmission.agentId !== context.agentId ||
+      gatewayAdmission.sessionKey !== sessionKey ||
+      gatewayAdmission.sessionId !== context.sessionId
     ) {
       return undefined;
     }
-    dashboardAdmission.assertCurrent();
+    gatewayAdmission.assertCurrent();
     return mintMessageActionTurnCapability({
       agentId: context.agentId,
       runId,
       sessionKey,
       sessionId: context.sessionId,
       currentSessionMessageId,
-      assertDashboardReadCurrent: dashboardAdmission.assertCurrent,
+      assertDashboardReadCurrent: dashboardAdmission?.assertCurrent,
+      assertNativeSessionReactionCurrent: nativeReactionAdmission?.assertCurrent,
       expiresWithRun: true,
     });
   }

@@ -19,7 +19,16 @@ import {
 } from "../../config/sessions/session-sharing-store.native.js";
 import { rotateAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
 import { clearAgentRunContext } from "../../infra/agent-run-registry.js";
+import {
+  captureActivePluginRegistrySnapshot,
+  restoreActivePluginRegistrySnapshot,
+  setActivePluginRegistry,
+} from "../../plugins/runtime.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
+import {
+  createChannelTestPluginBase,
+  createTestRegistry,
+} from "../../test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { registerChatAbortController } from "../chat-abort.js";
 import { createChatRunState } from "../server-chat-state.js";
@@ -47,24 +56,44 @@ const admissionScenarios = [
   "dashboard-member-revoked",
   "dashboard-unattested",
   "dashboard-internal",
+  "paired-ui",
+  "paired-ui-credential-revoked",
+  "paired-ui-member-revoked",
+  "paired-ui-unpaired",
+  "paired-ui-backend",
+  "paired-ui-system",
+  "paired-ui-foreign-origin",
 ] as const;
 
 it.each(admissionScenarios)(
   "keeps prepared-session binding with its exact admission: %s",
   async (scenario) => {
+    const paired = scenario.startsWith("paired-ui");
+    const nativeReactionAllowed =
+      paired &&
+      ["paired-ui", "paired-ui-credential-revoked", "paired-ui-member-revoked"].includes(scenario);
     const dashboard = scenario.startsWith("dashboard");
-    const directDashboard = dashboard && scenario !== "dashboard-internal";
-    const dashboardReadAllowed = directDashboard && scenario !== "dashboard-unattested";
-    const membershipRequired = scenario === "dashboard-member-revoked";
+    const directDashboard = (dashboard && scenario !== "dashboard-internal") || paired;
+    const dashboardReadAllowed =
+      dashboard && directDashboard && scenario !== "dashboard-unattested";
+    const membershipRequired = scenario.endsWith("member-revoked");
     const closure =
       scenario === "narrow-first-send"
         ? "rotated"
         : scenario === "dashboard-writer"
           ? "aborted"
-          : dashboard
+          : dashboard || paired
             ? "released"
             : scenario;
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const registry = captureActivePluginRegistrySnapshot();
+      const plugin = createChannelTestPluginBase({
+        id: "nativechat",
+        capabilities: { chatTypes: ["direct"], nativeSessionReactions: true },
+      });
+      setActivePluginRegistry(
+        createTestRegistry([{ pluginId: plugin.id, source: "test", plugin }]),
+      );
       const runId = "retained-preparation";
       const sessionKey = scenario === "dashboard" ? "agent:main:main" : "agent:main:binding";
       const scope = { agentId: "main", sessionKey };
@@ -100,6 +129,7 @@ it.each(admissionScenarios)(
       const hasCurrentClientAuthority = vi.fn(() => true);
       const client: GatewayClient = {
         connId: "authoring-binding",
+        ...(paired ? { internal: { authenticatedOperator: true as const } } : {}),
         connectionSignal: connection.signal,
         ...(dashboard && scenario !== "dashboard-unattested"
           ? {
@@ -129,9 +159,27 @@ it.each(admissionScenarios)(
                 : dashboard
                   ? ["operator.admin"]
                   : ["operator.read", "operator.write", "operator.admin"],
-          client: dashboard
-            ? { id: "openclaw-control-ui", version: "test", platform: "web", mode: "webchat" }
-            : { id: "cli", version: "test", platform: "test", mode: "cli" },
+          ...(paired && scenario !== "paired-ui-unpaired"
+            ? {
+                device: {
+                  id: "paired-app-device",
+                  publicKey: "test-key",
+                  signature: "test-signature",
+                  signedAt: 1,
+                  nonce: "test-nonce",
+                },
+              }
+            : {}),
+          client: paired
+            ? {
+                id: "gateway-client",
+                version: "test",
+                platform: "web",
+                mode: scenario === "paired-ui-backend" ? "backend" : "ui",
+              }
+            : dashboard
+              ? { id: "openclaw-control-ui", version: "test", platform: "web", mode: "webchat" }
+              : { id: "cli", version: "test", platform: "test", mode: "cli" },
         },
       };
       const namespaceRun = prepareSystemAgentRunAdmission({}, runId, "main", "test");
@@ -170,6 +218,26 @@ it.each(admissionScenarios)(
           // Exercise the ordinary dashboard alias without an explicit agentId.
           sessionKey: scenario === "dashboard" ? "main" : sessionKey,
           message: "Keep this user turn in its session",
+          ...(paired
+            ? {
+                ...(membershipRequired
+                  ? {}
+                  : {
+                      originatingChannel: "nativechat",
+                      originatingTo:
+                        scenario === "paired-ui-foreign-origin"
+                          ? "agent:main:unrelated"
+                          : sessionKey,
+                    }),
+                ...(membershipRequired
+                  ? {}
+                  : {
+                      systemInputProvenance: {
+                        kind: scenario === "paired-ui-system" ? "internal_system" : "external_user",
+                      },
+                    }),
+              }
+            : {}),
           idempotencyKey: runId,
         };
         const authorization = resolveSessionMutationAuthorization({
@@ -209,24 +277,34 @@ it.each(admissionScenarios)(
         options = await entered.promise;
         const dashboardRead = options.replyOptions?.dashboardReadAdmission;
         expect(Boolean(dashboardRead)).toBe(dashboardReadAllowed);
+        const nativeReaction = options.replyOptions?.nativeSessionReactionAdmission;
+        expect(Boolean(nativeReaction)).toBe(nativeReactionAllowed);
+        const sourceAuthority = dashboardRead ?? nativeReaction;
         owned = observeDispatch.mock.calls.at(-1)?.[0];
         const prepared = options.replyOptions?.onSessionPrepared;
         const runStarted = options.replyOptions?.onAgentRunStart;
-        if (!owned || !prepared || !runStarted || !owned.skillLibraryAuthoring) {
+        if (!owned || !prepared || !runStarted || (!paired && !owned.skillLibraryAuthoring)) {
           throw new Error("chat.send did not hand off its prepared-session callback");
         }
         // Initial resolution needs detached entries; later admission must not clone unrelated rows.
         expect.soft(unrelatedCloneCount()).toBeLessThanOrEqual(1);
         const capability = owned.skillLibraryAuthoring;
+        if (paired && !membershipRequired) {
+          expect(capability).toBeUndefined();
+        }
         const admittedContext = await namespaceRun.admit("embedded");
-        capability.bind(admittedContext);
+        capability?.bind(admittedContext);
         const caller = createAdmittedGatewayToolCallerIdentity({
           admittedRunContext: admittedContext,
           agentId: "main",
           sessionKey,
         });
-        const readLibrary = () =>
-          withGatewayToolCallerIdentity(caller, () => capability.invoke({ action: "list" }));
+        const readLibrary = () => {
+          if (!capability) {
+            throw new Error("This fixture has no skill-library authority");
+          }
+          return withGatewayToolCallerIdentity(caller, () => capability.invoke({ action: "list" }));
+        };
         const { admission, userTurn } = owned;
         const original = admission.activeRunAbort.entry;
         expect(original?.sessionId).toBe(initialSessionId);
@@ -249,29 +327,29 @@ it.each(admissionScenarios)(
         prepared(binding);
         prepared(binding);
         prepared({ ...binding, sessionKey: "agent:main:unrelated", sessionId: "foreign" });
-        if (dashboardRead) {
+        if (sourceAuthority) {
           expect(admission.admittedSessionId).toBe(initialSessionId);
-          expect(dashboardRead.sessionId).toBe(binding.sessionId);
-          dashboardRead.assertCurrent();
+          expect(sourceAuthority.sessionId).toBe(binding.sessionId);
+          sourceAuthority.assertCurrent();
         }
         clone.mockClear();
         runStarted(runId);
         expect.soft(unrelatedCloneCount()).toBe(0);
-        await expect(readLibrary()).resolves.toMatchObject({ profileId: profile.id });
-        if (dashboardRead) {
+        if (capability) {
+          await expect(readLibrary()).resolves.toMatchObject({ profileId: profile.id });
+        }
+        if (sourceAuthority) {
           connection.abort();
           expect(admission.activeRunAbort.controller.signal.aborted).toBe(false);
-          expect(dashboardRead.assertCurrent).not.toThrow();
-          if (scenario === "dashboard-credential-revoked") {
+          expect(sourceAuthority.assertCurrent).not.toThrow();
+          if (scenario.endsWith("credential-revoked")) {
             hasCurrentClientAuthority.mockReturnValue(false);
-            expect(dashboardRead.assertCurrent).toThrow(
-              "Dashboard message read admission is no longer active.",
-            );
+            expect(sourceAuthority.assertCurrent).toThrow(/admission is no longer active/);
           } else if (membershipRequired) {
             removeSessionMember(scope, profile.id, undefined, binding.sessionId);
             expect(admission.activeRunAbort.controller.signal.aborted).toBe(false);
             expect(hasCurrentClientAuthority()).toBe(true);
-            expect(dashboardRead.assertCurrent).toThrow("session is suggest for this connection");
+            expect(sourceAuthority.assertCurrent).toThrow("session is suggest for this connection");
           }
         }
 
@@ -315,17 +393,19 @@ it.each(admissionScenarios)(
         }
         // No await after closure: release must fence even before its promise settles.
         expect(() => prepared({ ...binding, sessionId: "late-session" })).toThrow();
-        if (dashboardRead) {
-          expect(dashboardRead.assertCurrent).toThrow();
+        if (sourceAuthority) {
+          expect(sourceAuthority.assertCurrent).toThrow();
         }
         expect(original?.sessionId).toBe(binding.sessionId);
         expect(successor?.entry?.sessionId).toBe(
           closure === "replaced" ? "successor-session" : undefined,
         );
-        if (closure === "queued") {
-          await expect(readLibrary()).resolves.toMatchObject({ profileId: profile.id });
-        } else if (closure === "released" || closure === "aborted" || closure === "rotated") {
-          await expect(readLibrary()).rejects.toThrow();
+        if (capability) {
+          if (closure === "queued") {
+            await expect(readLibrary()).resolves.toMatchObject({ profileId: profile.id });
+          } else if (closure === "released" || closure === "aborted" || closure === "rotated") {
+            await expect(readLibrary()).rejects.toThrow();
+          }
         }
         if (closure !== "queued") {
           await upsertSessionEntryCore(scope, { sessionId: "late-session", updatedAt: Date.now() });
@@ -339,6 +419,7 @@ it.each(admissionScenarios)(
           ).toEqual([]);
         }
       } finally {
+        restoreActivePluginRegistrySnapshot(registry);
         namespaceRun.close();
         options?.replyOptions?.turnAdoptionLifecycle?.onSettled?.();
         reply?.complete();

@@ -108,27 +108,46 @@ describe("agent-runner-utils", () => {
       };
     }
 
-    it("mints host-only dashboard authority for the original admitted identity", () => {
-      const turn = makeTurn();
-      const now = Date.now();
-      const token = mintReplyMessageActionTurnCapability(turn, source.runId);
-      const lookup = { ...source, token };
-      const clock = vi
-        .spyOn(Date, "now")
-        .mockReturnValue(now + turn.followupRun.run.timeoutMs + 60_001);
-      try {
-        const authority = resolveMessageActionTurnAuthorization(lookup);
-        expect(authority?.assertDashboardReadCurrent).toBeTypeOf("function");
-        authority?.assertDashboardReadCurrent?.();
-        expect(turn.opts?.dashboardReadAdmission?.assertCurrent).toHaveBeenCalled();
-        expect(resolveMessageActionTurnCapability(lookup)).not.toHaveProperty(
-          "assertDashboardReadCurrent",
-        );
-      } finally {
-        clock.mockRestore();
-        revokeMessageActionTurnCapability(token);
-      }
-    });
+    it.each(["dashboard", "native-reaction"] as const)(
+      "mints private %s authority for the original admitted identity",
+      (kind) => {
+        const turn = makeTurn();
+        if (kind === "native-reaction") {
+          turn.opts!.nativeSessionReactionAdmission = turn.opts!.dashboardReadAdmission;
+          delete turn.opts!.dashboardReadAdmission;
+        }
+        const now = Date.now();
+        const token = mintReplyMessageActionTurnCapability(turn, source.runId);
+        const lookup = { ...source, token };
+        const clock = vi
+          .spyOn(Date, "now")
+          .mockReturnValue(now + turn.followupRun.run.timeoutMs + 60_001);
+        try {
+          const authority = resolveMessageActionTurnAuthorization(lookup);
+          const admission =
+            turn.opts?.dashboardReadAdmission ?? turn.opts?.nativeSessionReactionAdmission;
+          const assertCurrent =
+            kind === "dashboard"
+              ? authority?.assertDashboardReadCurrent
+              : authority?.assertNativeSessionReactionCurrent;
+          expect(assertCurrent).toBeTypeOf("function");
+          assertCurrent?.();
+          expect(admission?.assertCurrent).toHaveBeenCalled();
+          if (kind === "native-reaction") {
+            expect(authority?.assertDashboardReadCurrent).toBeUndefined();
+          }
+          expect(resolveMessageActionTurnCapability(lookup)).not.toHaveProperty(
+            "assertDashboardReadCurrent",
+          );
+          expect(resolveMessageActionTurnCapability(lookup)).not.toHaveProperty(
+            "assertNativeSessionReactionCurrent",
+          );
+        } finally {
+          clock.mockRestore();
+          revokeMessageActionTurnCapability(token);
+        }
+      },
+    );
 
     it("rejects inherited dashboard options outside their admitted source", () => {
       const turn = makeTurn();

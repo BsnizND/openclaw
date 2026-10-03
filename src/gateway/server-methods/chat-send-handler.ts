@@ -158,6 +158,7 @@ async function handleChatSendWithOptions(
     isCurrent: hasCurrentClientAuthority,
     inputProvenance: systemInputProvenance,
     hasExplicitOrigin: normalizedRequest.value.explicitOrigin !== undefined,
+    explicitOrigin: normalizedRequest.value.explicitOrigin,
     hasRestoredCronContinuation: entry?.cronRunContinuation !== undefined,
     isIncognitoEntry: entry?.incognito === true,
     isReconnectResume: reconnectResumeRequested,
@@ -167,46 +168,50 @@ async function handleChatSendWithOptions(
     turnKind: normalizedRequest.value.turnKind,
   };
   const cronCreatorAuthority = externalAuthorityAdmission?.resolve(externalAdmissionParams);
-  let dashboardSessionAuthorization: SessionMutationAuthorization | undefined;
-  const assertDashboardReadCurrent = externalAuthorityAdmission?.allowsDashboardReads(
-    externalAdmissionParams,
-  )
-    ? () => {
-        admitted.value.assertWorkAdmissionCurrent();
-        sessionMutationCommitGuard?.();
-        // Admitted runs survive transport loss; their caller authority must stay current.
-        if (
-          client?.invalidated ||
-          hasCurrentClientAuthority?.() === false ||
-          !externalAuthorityAdmission.allowsDashboardReads(externalAdmissionParams)
-        ) {
-          throw new Error("Dashboard message read admission is no longer active.");
-        }
-        if (!dashboardSessionAuthorization) {
-          // The original preparation may create its SID. Capture it once, never a successor.
-          const resolved = resolveSessionMutationAuthorization({
-            client,
-            context,
-            method: "chat.send",
-            requestParams: { agentId: preparedSession.value.agentId, sessionKey },
-            expectedTarget: {
-              agentId: preparedSession.value.agentId,
-              sessionKey,
-              storePath,
-              sessionId: admitted.value.sessionBinding.sessionId,
-            },
-          });
-          if (resolved.error) {
-            throw new SessionMutationAuthorizationChangedError(resolved.error);
+  let externalSessionAuthorization: SessionMutationAuthorization | undefined;
+  const bindExternalSessionAuthority = (isAllowed: () => boolean, label: string) =>
+    isAllowed()
+      ? () => {
+          admitted.value.assertWorkAdmissionCurrent();
+          sessionMutationCommitGuard?.();
+          // Admitted runs survive transport loss; their caller authority must stay current.
+          if (client?.invalidated || hasCurrentClientAuthority?.() === false || !isAllowed()) {
+            throw new Error(`${label} admission is no longer active.`);
           }
-          if (!resolved.authorization) {
-            throw new Error("Dashboard session authorization is unavailable.");
+          if (!externalSessionAuthorization) {
+            // The original preparation may create its SID. Capture it once, never a successor.
+            const resolved = resolveSessionMutationAuthorization({
+              client,
+              context,
+              method: "chat.send",
+              requestParams: { agentId: preparedSession.value.agentId, sessionKey },
+              expectedTarget: {
+                agentId: preparedSession.value.agentId,
+                sessionKey,
+                storePath,
+                sessionId: admitted.value.sessionBinding.sessionId,
+              },
+            });
+            if (resolved.error) {
+              throw new SessionMutationAuthorizationChangedError(resolved.error);
+            }
+            if (!resolved.authorization) {
+              throw new Error("External user session authorization is unavailable.");
+            }
+            externalSessionAuthorization = resolved.authorization;
           }
-          dashboardSessionAuthorization = resolved.authorization;
+          externalSessionAuthorization.assertCurrent();
         }
-        dashboardSessionAuthorization.assertCurrent();
-      }
-    : undefined;
+      : undefined;
+  const assertDashboardReadCurrent = bindExternalSessionAuthority(
+    () => externalAuthorityAdmission?.allowsDashboardReads(externalAdmissionParams) === true,
+    "Dashboard message read",
+  );
+  const assertNativeSessionReactionCurrent = bindExternalSessionAuthority(
+    () =>
+      externalAuthorityAdmission?.allowsNativeSessionReactions?.(externalAdmissionParams) === true,
+    "Native session reaction",
+  );
 
   const admissionStartedAt = Date.now();
   const terminalizeRestartSafeAdmission = async (
@@ -600,6 +605,7 @@ async function handleChatSendWithOptions(
       skillLibraryAuthoring,
       cronCreatorAuthority,
       assertDashboardReadCurrent,
+      assertNativeSessionReactionCurrent,
       externalAuthorityAdmission,
       injection: {
         beginCapturedMessageInjection,

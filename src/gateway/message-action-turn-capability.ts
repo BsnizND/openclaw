@@ -50,6 +50,8 @@ export type MessageActionAuthorization = {
   scheduled?: ScheduledMessageActionAuthority;
   /** @internal Redeemed only by the host; never serialized or passed to plugins. */
   assertDashboardReadCurrent?: () => void;
+  /** @internal A paired human UI reaction grant; never a provider action grant. */
+  assertNativeSessionReactionCurrent?: () => void;
 };
 
 type MessageActionRequesterIdentity = {
@@ -102,6 +104,8 @@ type MessageActionTurnCapability = AgentRuntimeMessageActionContext & {
   sessionKey: string;
   scheduled?: ScheduledMessageActionAuthority;
   assertDashboardReadCurrent?: () => void;
+  /** @internal A paired human UI reaction grant; never a provider action grant. */
+  assertNativeSessionReactionCurrent?: () => void;
 };
 
 const capabilitiesByToken = new Map<string, MessageActionTurnCapability>();
@@ -198,6 +202,8 @@ export function mintMessageActionTurnCapability(params: {
   toolContext?: InternalChannelThreadingToolContext;
   scheduled?: ScheduledMessageActionAuthority;
   assertDashboardReadCurrent?: () => void;
+  /** @internal A paired human UI reaction grant; never a provider action grant. */
+  assertNativeSessionReactionCurrent?: () => void;
   expiresWithRun?: boolean;
   ttlMs?: number;
   nowMs?: number;
@@ -263,6 +269,13 @@ export function mintMessageActionTurnCapability(params: {
     capability.assertDashboardReadCurrent = () => {
       assertActive();
       assertDashboardReadCurrent();
+    };
+  }
+  const assertNativeSessionReactionCurrent = params.assertNativeSessionReactionCurrent;
+  if (assertNativeSessionReactionCurrent) {
+    capability.assertNativeSessionReactionCurrent = () => {
+      assertActive();
+      assertNativeSessionReactionCurrent();
     };
   }
   capabilitiesByToken.set(token, capability);
@@ -354,9 +367,11 @@ export function resolveMessageActionTurnAuthorization(
             throw new Error("message action current-turn authority is no longer active");
           }
           capability.assertDashboardReadCurrent?.();
+          capability.assertNativeSessionReactionCurrent?.();
         },
         scheduled: capability.scheduled,
         assertDashboardReadCurrent: capability.assertDashboardReadCurrent,
+        assertNativeSessionReactionCurrent: capability.assertNativeSessionReactionCurrent,
       }
     : undefined;
 }

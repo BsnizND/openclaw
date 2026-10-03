@@ -275,6 +275,13 @@ function prepareMessageActionReadContext(
   if (!registration) {
     return undefined;
   }
+  if (
+    ctx.messageActionAuthorization?.assertNativeSessionReactionCurrent &&
+    !ctx.messageActionAuthorization.assertDashboardReadCurrent &&
+    (ctx.action !== "react" || registration.plugin.capabilities.nativeSessionReactions !== true)
+  ) {
+    throw new Error("This current-turn authority permits native session reactions only");
+  }
   const action = ctx.action as ChannelMessageActionName;
   const authority = registration.captureReadAuthority?.();
   const hasRegistrationAuthority = authority?.() === true;
