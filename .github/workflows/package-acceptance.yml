@@ -485,15 +485,15 @@ jobs:
           } catch {
             throw new Error(message);
           }
-          const prefix = 'openclaw/openclaw/.github/workflows/package-acceptance.yml@';
+          const prefix = 'BsnizND/openclaw/.github/workflows/package-acceptance.yml@';
           const ref = typeof job?.workflow_ref === 'string' && job.workflow_ref.startsWith(prefix)
             ? job.workflow_ref.slice(prefix.length) : '';
           const namedRef = /^refs\/(?:heads|tags)\/([^\x00-\x20\x7f~^:?*[\]\\]+)$/.exec(ref);
           const validNamedRef = namedRef && namedRef[0] === ref && !ref.includes('..') && !ref.includes('@{') &&
             !ref.endsWith('.') && ref.split('/').every(part => part && !part.startsWith('.') && !part.endsWith('.lock'));
           const sha = job?.workflow_sha;
-          if (job?.workflow_repository !== 'openclaw/openclaw' ||
-              process.env.GITHUB_REPOSITORY !== 'openclaw/openclaw' ||
+          if (job?.workflow_repository !== 'BsnizND/openclaw' ||
+              process.env.GITHUB_REPOSITORY !== 'BsnizND/openclaw' ||
               typeof sha !== 'string' || sha.length !== 40 || !/^[0-9a-f]{40}$/.test(sha) ||
               (!validNamedRef && ref !== sha)) {
             throw new Error(message);

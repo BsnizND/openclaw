@@ -333,7 +333,7 @@ async function planWorkflowAdmission(input) {
   );
   if (
     input.version !== 2 ||
-    input.repository !== "openclaw/openclaw" ||
+    input.repository !== "BsnizND/openclaw" ||
     !["parent", "release-checks", "reusable", "package"].includes(input.workflow)
   ) {
     throw new Error("invalid workflow admission identity");
@@ -415,7 +415,7 @@ async function planWorkflowAdmission(input) {
   }
   if (
     !/^[a-f0-9]{64}$/u.test(input.binding.inputsDigest) ||
-    !input.binding.workflowRef?.startsWith(`openclaw/openclaw/.github/workflows/`)
+    !input.binding.workflowRef?.startsWith(`BsnizND/openclaw/.github/workflows/`)
   ) {
     throw new Error("missing workflow input binding");
   }
@@ -976,7 +976,7 @@ async function preflightFrozenTargetContracts(input, workflow = false, verifiedT
     ],
     "admission request",
   );
-  if (input.version !== 1 || input.repository !== "openclaw/openclaw") {
+  if (input.version !== 1 || input.repository !== "BsnizND/openclaw") {
     throw new Error("invalid admission identity");
   }
   const allow = boolean(input.allowFrozenTargetScenarioOmissions);

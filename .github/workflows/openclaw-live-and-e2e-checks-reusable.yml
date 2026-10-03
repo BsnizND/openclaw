@@ -2194,6 +2194,7 @@ jobs:
         if: ${{ !cancelled() && (success() || steps.validate_credentials.outcome == 'failure') }}
         shell: bash
         env:
+          OPENCLAW_PUBLISHED_DRIVER_LEGACY_SQLITE: "1"
           ARTIFACT_SUFFIX: ${{ steps.plan.outputs.artifact_suffix }}
           INCLUDE_RELEASE_PATH_SUITES: ${{ inputs.include_release_path_suites }}
           PREPUBLISH_PLUGIN_REGISTRY_ENABLED: ${{ steps.plan.outputs.needs_package == '1' && needs.prepare_docker_e2e_image.outputs.prepublish_plugin_registry_artifact_id != '' && '1' || '0' }}
