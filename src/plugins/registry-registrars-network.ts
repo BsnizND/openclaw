@@ -327,7 +327,7 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
       rootDir: record.rootDir,
     };
     // Bind the selected registration; unchanged instances can move to a new registry.
-    const captureReadAuthority = () => {
+    const captureRegistrationAuthority = () => {
       const currentRegistry = getPluginRecordRegistry(registry, record);
       const entry = currentRegistry.channels.find((candidate) => candidate.plugin.id === id);
       const ownerCurrent = capturePluginLifecycleAuthority(currentRegistry, record, {
@@ -335,17 +335,30 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
       });
       const isCurrent = () =>
         ownerCurrent?.() === true &&
-        (record.origin === "bundled" || record.trustedOfficialInstall === true) &&
         entry !== undefined &&
         getPluginRecordRegistry(registry, record).channels.includes(entry) &&
         entry.pluginId === record.id &&
         entry.plugin === metadata.plugin &&
-        entry.captureReadAuthority === captureReadAuthority;
+        entry.captureRegistrationAuthority === captureRegistrationAuthority;
+      return isCurrent() ? isCurrent : undefined;
+    };
+    const captureReadAuthority = () => {
+      const registrationCurrent = captureRegistrationAuthority();
+      const isCurrent = () =>
+        registrationCurrent?.() === true &&
+        (record.origin === "bundled" || record.trustedOfficialInstall === true) &&
+        getPluginRecordRegistry(registry, record).channels.find(
+          (candidate) => candidate.plugin.id === id,
+        )?.captureReadAuthority === captureReadAuthority;
       return isCurrent() ? isCurrent : undefined;
     };
     if (existing) {
       if (existingRuntime) {
-        Object.assign(existingRuntime, metadata, { resolveChannelRuntime, captureReadAuthority });
+        Object.assign(existingRuntime, metadata, {
+          resolveChannelRuntime,
+          captureRegistrationAuthority,
+          captureReadAuthority,
+        });
       }
       if (existingSetup) {
         Object.assign(existingSetup, metadata, { enabled: record.enabled });
@@ -361,6 +374,7 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
         ...metadata,
         pluginId: record.id,
         resolveChannelRuntime,
+        captureRegistrationAuthority,
         captureReadAuthority,
       });
     }

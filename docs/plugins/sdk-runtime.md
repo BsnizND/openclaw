@@ -411,6 +411,11 @@ returns the committed `{ messageId, reactions, changed }`; an unavailable or
 closed capability rejects. Retained callbacks cannot write after the plugin
 invocation or its run authority ends.
 
+The host verifies the exact live channel registration separately from official
+provider-read grants. A configured external channel can use native session
+reactions without becoming a trusted official provider. Disabled, revoked,
+replaced, or re-registered channel callbacks cannot retain reaction authority.
+
 The host derives the actor (`agent:<agentId>`), label, store, and transcript
 instance. Input cannot select an actor or another session. Agent writes use
 the same worker-owned reaction table and `session.reaction` event as human

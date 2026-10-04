@@ -39,13 +39,14 @@ import {
 import { runMessageAction } from "../src/infra/outbound/message-action-runner.js";
 import { peekSystemEventEntries } from "../src/infra/system-events.js";
 import { reactToCurrentSessionMessage } from "../src/plugin-sdk/session-reaction-runtime.js";
+import { revokePluginRecord } from "../src/plugins/registry-lifecycle.js";
+import { createPluginRegistry } from "../src/plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../src/plugins/runtime.js";
+import type { PluginRuntime } from "../src/plugins/runtime/types.js";
+import { createPluginRecord } from "../src/plugins/status.test-fixtures.js";
 import { onSessionReaction } from "../src/sessions/reaction-events.js";
 import { resolveOpenClawAgentSqlitePath } from "../src/state/openclaw-agent-db.paths.js";
-import {
-  createChannelTestPluginBase,
-  createTestRegistry,
-} from "../src/test-utils/channel-plugins.js";
+import { createChannelTestPluginBase } from "../src/test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../src/test-utils/openclaw-test-state.js";
 
 afterEach(() => {
@@ -104,7 +105,21 @@ async function fixture(
       handleAction: async (context) => ({ content: [], details: await handle(context) }),
     },
   };
-  setActivePluginRegistry(createTestRegistry([{ pluginId: "testchat", source: "test", plugin }]));
+  const owner = createPluginRegistry({
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+    runtime: {} as PluginRuntime,
+    activateGlobalSideEffects: false,
+  });
+  const record = createPluginRecord({
+    id: "lifeos-app-channel",
+    origin: "config",
+    trustedOfficialInstall: false,
+  });
+  owner.registry.plugins.push(record);
+  const register = () =>
+    owner.createApi(record, { config: {}, registrationMode: "full" }).registerChannel({ plugin });
+  register();
+  setActivePluginRegistry(owner.registry);
   const context: Parameters<typeof dispatchChannelMessageAction>[0] = {
     cfg: { agents: { list: [{ id: "main", identity: { name: "Jay" } }] } },
     channel: "testchat",
@@ -115,10 +130,49 @@ async function fixture(
     sessionId,
     messageActionAuthorization: authorization,
   };
-  return { scope, sessionId, sessionKey, messageId, context, token, run };
+  return { scope, sessionId, sessionKey, messageId, context, token, run, owner, record, register };
 }
 
 describe("native current-turn agent reaction", () => {
+  it.each(["disable", "revoke", "replace", "reregister"] as const)(
+    "denies the real external registration after %s before committing a reaction",
+    async (change) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
+        let retained: ChannelMessageActionContext | undefined;
+        const f: Awaited<ReturnType<typeof fixture>> = await fixture(async (context) => {
+          retained = context;
+          if (change === "disable") {
+            f.record.enabled = false;
+          } else if (change === "revoke") {
+            revokePluginRecord(f.owner.registry, f.record);
+          } else if (change === "replace") {
+            setActivePluginRegistry(
+              createPluginRegistry({
+                logger: { info() {}, warn() {}, error() {}, debug() {} },
+                runtime: {} as PluginRuntime,
+                activateGlobalSideEffects: false,
+              }).registry,
+            );
+          } else {
+            f.register();
+          }
+          return await reactToCurrentSessionMessage(context, {
+            messageId: f.messageId,
+            emoji: "❤️",
+          });
+        }, true);
+        try {
+          await expect(dispatchChannelMessageAction(f.context)).rejects.toThrow(
+            "alias authority is no longer active",
+          );
+          expect(retained).toBeDefined();
+          expect(listSessionReactions(f.scope, { sessionId: f.sessionId })).toEqual({});
+        } finally {
+          revokeMessageActionTurnCapability(f.token);
+        }
+      });
+    },
+  );
   it.each(["core", "codex"] as const)(
     "commits an independent agent actor through %s, persists completion, and closes retained writes",
     async (runtime) => {

@@ -9,6 +9,8 @@ export type ActivePluginChannelRegistration = {
   plugin: ActiveChannelPluginRuntimeShape;
   pluginId?: string | null;
   origin?: import("./plugin-origin.types.js").PluginOrigin | null;
+  /** Host-owned lifecycle capture of this exact channel registration, independent of read grants. */
+  captureRegistrationAuthority?: () => (() => boolean) | undefined;
   /** Host-owned capture of the exact verified official channel registration. */
   captureReadAuthority?: () => (() => boolean) | undefined;
   resolveChannelRuntime?: () => import("./runtime/types-channel.js").PluginRuntimeChannel;

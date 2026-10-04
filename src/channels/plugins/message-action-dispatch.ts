@@ -284,6 +284,7 @@ function prepareMessageActionReadContext(
   }
   const action = ctx.action as ChannelMessageActionName;
   const authority = registration.captureReadAuthority?.();
+  const registrationAuthority = registration.captureRegistrationAuthority?.();
   const hasRegistrationAuthority = authority?.() === true;
   const enforcement = resolveMessageActionReadEnforcement({
     action,
@@ -353,7 +354,7 @@ function prepareMessageActionReadContext(
       assertDashboardReadCurrent?.();
       scheduledAccess?.assertCurrent();
       const current =
-        registration.captureReadAuthority && !authority?.()
+        registration.captureRegistrationAuthority && !registrationAuthority?.()
           ? undefined
           : resolveChannelPluginRegistration(ctx.channel, { loadedOnly: true });
       if (current?.plugin !== registration.plugin || current.origin !== registration.origin) {

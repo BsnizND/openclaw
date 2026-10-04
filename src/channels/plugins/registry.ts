@@ -30,6 +30,7 @@ export function resolveChannelPluginRegistration(
   | {
       plugin: ChannelPlugin;
       origin?: string;
+      captureRegistrationAuthority?: () => (() => boolean) | undefined;
       captureReadAuthority?: () => (() => boolean) | undefined;
       resolveChannelRuntime?: NonNullable<
         ReturnType<typeof getLoadedChannelPluginEntryById>
@@ -55,6 +56,9 @@ export function resolveChannelPluginRegistration(
         ? { resolveChannelRuntime: loadedEntry.resolveChannelRuntime }
         : {}),
       ...(origin ? { origin } : {}),
+      ...(loadedEntry.captureRegistrationAuthority
+        ? { captureRegistrationAuthority: loadedEntry.captureRegistrationAuthority }
+        : {}),
       // An explicit scope cannot borrow an official grant from a root fallback.
       ...((!scopedRegistry || scopedEntry) && loadedEntry.captureReadAuthority
         ? { captureReadAuthority: loadedEntry.captureReadAuthority }
