@@ -117,6 +117,49 @@ describe("OpenAI realtime voice provider routing", () => {
     expect(bridge.supportsToolResultSuppression).toBe(true);
   });
 
+  it.each([true, false])(
+    "carries consult policy %s to the GPT-Live startup wire",
+    async (enabled) => {
+      const provider = buildOpenAIRealtimeVoiceProvider();
+      const bridge = provider.createBridge({
+        providerConfig: { apiKey: "test-api-key-test", model: "gpt-live-1" },
+        instructions: "Book the supplied fictional table; ask about unknown facts.",
+        agentConsultEnabled: enabled,
+        runAgentConsult: vi.fn(async () => ({ text: "Done" })),
+        onAudio: vi.fn(),
+        onClearAudio: vi.fn(),
+      });
+      const connecting = bridge.connect();
+      await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+      const socket = FakeWebSocket.instances[0]!;
+      try {
+        socket.readyState = FakeWebSocket.OPEN;
+        socket.emit("open");
+        await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(0));
+        const start = socket.sent
+          .map((value) => JSON.parse(value))
+          .find((value) => value.type === "session.start");
+        expect(start).toBeDefined();
+        const instructions = start.session.instructions;
+        expect(instructions).toContain("Book the supplied fictional table");
+        expect(instructions.includes("Delegate any request")).toBe(enabled);
+        expect(instructions.includes("Agent delegation and tools are unavailable")).toBe(!enabled);
+        socket.emit(
+          "message",
+          Buffer.from(JSON.stringify({ type: "session.started", session: {} })),
+        );
+        await connecting;
+      } finally {
+        const closing = bridge.close();
+        socket.emit(
+          "message",
+          Buffer.from(JSON.stringify({ type: "session.closed", reason: "close_requested" })),
+        );
+        await Promise.allSettled([connecting, closing]);
+      }
+    },
+  );
+
   it.each([
     {
       name: "browser capability projection",

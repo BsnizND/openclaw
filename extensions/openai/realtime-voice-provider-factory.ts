@@ -456,7 +456,11 @@ export function buildOpenAIRealtimeVoiceProvider(
               ...req,
               model,
               voice: config.voice,
-              instructions: buildOpenAIQuicksilverInstructions(model, req.instructions),
+              instructions: buildOpenAIQuicksilverInstructions(
+                model,
+                req.instructions,
+                req.agentConsultEnabled,
+              ),
               logger: options?.logger ?? { debug: () => undefined, warn: () => undefined },
               resolveAuth: () =>
                 resolveOpenAIQuicksilverBridgeAuth(
@@ -477,7 +481,11 @@ export function buildOpenAIRealtimeVoiceProvider(
             ...req,
             model,
             voice: config.voice,
-            instructions: buildOpenAIQuicksilverInstructions(model, req.instructions),
+            instructions: buildOpenAIQuicksilverInstructions(
+              model,
+              req.instructions,
+              req.agentConsultEnabled,
+            ),
             logger: options?.logger ?? { warn: () => undefined },
             resolveAuth: async () => ({
               type: "api-key",

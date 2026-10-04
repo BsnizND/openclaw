@@ -42,13 +42,19 @@ ${records}
 export function buildOpenAIQuicksilverInstructions(
   model: string,
   operatorInstructions?: string,
+  agentConsultEnabled = true,
 ): string {
   const channels = isOpenAIGptLiveApiModel(model)
     ? `Information in session.thinking.append is silent context. Use it when relevant, but do not read it aloud merely because it arrives.
 Information in session.commentary.append is an update to speak aloud naturally.
 Instructions in session.instructions.append direct the live session. Follow those directions without reading them aloud as content. Never mention the channel or the delegation.`
     : OPENAI_QUICKSILVER_CHANNEL_INSTRUCTIONS;
-  const instructions = `${OPENAI_QUICKSILVER_DELEGATION_INSTRUCTIONS}\n${channels}`;
+  const delegation = agentConsultEnabled
+    ? OPENAI_QUICKSILVER_DELEGATION_INSTRUCTIONS
+    : `You are the realtime voice assistant for this conversation. Agent delegation and tools are unavailable.
+Answer and reason directly from the supplied context. When necessary information is missing, ask the caller or explain that it needs confirmation after the call.
+Do not delegate, claim to perform a lookup, or claim a lookup failed.`;
+  const instructions = `${delegation}\n${channels}`;
   const operator = operatorInstructions?.trim();
   return operator ? `${instructions}\n\n${operator}` : instructions;
 }

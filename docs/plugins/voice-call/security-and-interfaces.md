@@ -82,31 +82,49 @@ p50, and p95 for turn latency and listen-wait times.
 
 Tool name: `voice_call`.
 
-| Action          | Args                                       |
-| --------------- | ------------------------------------------ |
-| `initiate_call` | `message`, `to?`, `mode?`, `dtmfSequence?` |
-| `continue_call` | `callId`, `message`                        |
-| `speak_to_user` | `callId`, `message`                        |
-| `send_dtmf`     | `callId`, `digits`                         |
-| `end_call`      | `callId`                                   |
-| `get_status`    | `callId`                                   |
+| Action          | Args                                                                |
+| --------------- | ------------------------------------------------------------------- |
+| `initiate_call` | `message`, `to?`, `mode?`, `dtmfSequence?`, `realtimeInstructions?` |
+| `continue_call` | `callId`, `message`                                                 |
+| `speak_to_user` | `callId`, `message`                                                 |
+| `send_dtmf`     | `callId`, `digits`                                                  |
+| `end_call`      | `callId`                                                            |
+| `get_status`    | `callId`                                                            |
 
 The voice-call plugin ships a matching agent skill.
 
 ## Gateway RPC
 
-| Method                      | Args                                                             | Notes                                                                     |
-| --------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `voicecall.initiate`        | `to?`, `message`, `mode?`, `sessionKey?`, `requesterSessionKey?` | Falls back to `toNumber` config when `to` is omitted.                     |
-| `voicecall.start`           | `to`, `message?`, `mode?`, `dtmfSequence?`, `sessionKey?`        | Same as `initiate` but also accepts pre-connect `dtmfSequence`.           |
-| `voicecall.continue`        | `callId`, `message`                                              | Blocks until the turn resolves; returns the transcript.                   |
-| `voicecall.continue.start`  | `callId`, `message`                                              | Async variant: returns an `operationId` immediately.                      |
-| `voicecall.continue.result` | `operationId`                                                    | Polls a pending `voicecall.continue.start` operation for its result.      |
-| `voicecall.speak`           | `callId`, `message`                                              | Speaks without waiting; uses the realtime bridge when `realtime.enabled`. |
-| `voicecall.dtmf`            | `callId`, `digits`                                               |                                                                           |
-| `voicecall.end`             | `callId`                                                         |                                                                           |
-| `voicecall.status`          | `callId?`                                                        | Omit `callId` to list all active calls.                                   |
+| Method                      | Args                                                                                      | Notes                                                                     |
+| --------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `voicecall.initiate`        | `to?`, `message`, `mode?`, `sessionKey?`, `requesterSessionKey?`, `realtimeInstructions?` | Falls back to `toNumber` config when `to` is omitted.                     |
+| `voicecall.start`           | `to`, `message?`, `mode?`, `dtmfSequence?`, `sessionKey?`, `realtimeInstructions?`        | Same as `initiate` but also accepts pre-connect `dtmfSequence`.           |
+| `voicecall.continue`        | `callId`, `message`                                                                       | Blocks until the turn resolves; returns the transcript.                   |
+| `voicecall.continue.start`  | `callId`, `message`                                                                       | Async variant: returns an `operationId` immediately.                      |
+| `voicecall.continue.result` | `operationId`                                                                             | Polls a pending `voicecall.continue.start` operation for its result.      |
+| `voicecall.speak`           | `callId`, `message`                                                                       | Speaks without waiting; uses the realtime bridge when `realtime.enabled`. |
+| `voicecall.dtmf`            | `callId`, `digits`                                                                        |                                                                           |
+| `voicecall.end`             | `callId`                                                                                  |                                                                           |
+| `voicecall.status`          | `callId?`                                                                                 | Omit `callId` to list all active calls.                                   |
 
 `dtmfSequence` is only valid with `mode: "conversation"`; notify-mode calls
 should use `voicecall.dtmf` after the call exists if they need post-connect
 digits.
+
+## Private instructions for one realtime call
+
+`voicecall.initiate`, `voicecall.start`, and the `voice_call` initiation forms
+accept optional `realtimeInstructions`. Supply a nonempty string of at most
+20,000 characters for an outbound `conversation` call with realtime enabled.
+Other modes and malformed values are rejected before storing or dialing a call.
+
+These instructions are appended to the selected agent's existing realtime
+context for that call. They are separate from the spoken `message`; notification
+calls cannot accept them. Calls without the field and inbound calls do not
+inherit another call's instructions. Global realtime configuration is unchanged.
+
+Private instructions are retained in native call metadata and call history, so
+protect the call store as private agent data. Redacted Gateway status responses
+do not include them. `voicecall.status` without a call ID returns
+`capabilities.perCallRealtimeInstructions: true` when this native interface is
+available; callers that require it should check that capability before dialing.

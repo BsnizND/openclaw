@@ -263,6 +263,8 @@ export type RealtimeVoiceBridgeCreateRequest = RealtimeVoiceBridgeCallbacks & {
   autoRespondToAudio?: boolean;
   interruptResponseOnInputAudio?: boolean;
   tools?: RealtimeVoiceTool[];
+  /** False when this session forbids agent delegation; defaults to enabled. */
+  agentConsultEnabled?: boolean;
   /** Host-injected agent delegation runner for provider-owned realtime control channels. */
   runAgentConsult?: RealtimeVoiceAgentConsultRunner;
 };

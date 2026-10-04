@@ -53,6 +53,14 @@ const VoiceCallToolSchema = Type.Union([
     mode: Type.Optional(Type.Union([Type.Literal("notify"), Type.Literal("conversation")])),
     sessionKey: Type.Optional(Type.String({ description: "OpenClaw session key for the call" })),
     dtmfSequence: Type.Optional(Type.String({ description: "DTMF digits to play before connect" })),
+    realtimeInstructions: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 20_000,
+        description:
+          "Private model instructions for this realtime conversation, separate from the spoken intro",
+      }),
+    ),
   }),
   Type.Object({
     action: Type.Literal("continue_call"),
@@ -84,6 +92,14 @@ const VoiceCallToolSchema = Type.Union([
     message: Type.Optional(Type.String({ description: "Optional intro message" })),
     sessionKey: Type.Optional(Type.String({ description: "OpenClaw session key for the call" })),
     dtmfSequence: Type.Optional(Type.String({ description: "DTMF digits to play before connect" })),
+    realtimeInstructions: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 20_000,
+        description:
+          "Private model instructions for this realtime conversation, separate from the spoken intro",
+      }),
+    ),
   }),
 ]);
 
@@ -332,6 +348,7 @@ export default definePluginEntry({
             params?.mode === "notify" || params?.mode === "conversation" ? params.mode : undefined,
           sessionKey: normalizeOptionalString(params?.sessionKey),
           requesterSessionKey: normalizeOptionalString(params?.requesterSessionKey),
+          realtimeInstructions: params?.realtimeInstructions,
         });
       },
       VOICE_CALL_WRITE_METHOD_SCOPE,
@@ -437,6 +454,7 @@ export default definePluginEntry({
           dtmfSequence: normalizeOptionalString(params?.dtmfSequence),
           sessionKey: normalizeOptionalString(params?.sessionKey),
           requesterSessionKey: normalizeOptionalString(params?.requesterSessionKey),
+          realtimeInstructions: params?.realtimeInstructions,
           agentId: normalizedAgentId,
         });
       },
@@ -476,6 +494,7 @@ export default definePluginEntry({
                       rawParams.mode === "notify" || rawParams.mode === "conversation"
                         ? rawParams.mode
                         : undefined,
+                    realtimeInstructions: rawParams.realtimeInstructions,
                     sessionKey: normalizeOptionalString(rawParams.sessionKey),
                     agentId,
                     requesterSessionKey,
@@ -530,6 +549,7 @@ export default definePluginEntry({
                 to: normalizeOptionalString(rawParams.to),
                 dtmfSequence: normalizeOptionalString(rawParams.dtmfSequence),
                 message: normalizeOptionalString(rawParams.message),
+                realtimeInstructions: rawParams.realtimeInstructions,
                 sessionKey: normalizeOptionalString(rawParams.sessionKey),
                 agentId,
                 requesterSessionKey,

@@ -35,7 +35,11 @@ import { setVoiceCallStateRuntime, type VoiceCallStateRuntime } from "./runtime-
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
 import { createTelephonyTtsProvider } from "./telephony-tts.js";
 import { startTunnel, type TunnelResult } from "./tunnel.js";
-import type { CallRecord } from "./types.js";
+import {
+  REALTIME_CALL_INSTRUCTIONS_ERROR,
+  RealtimeCallInstructionsSchema,
+  type CallRecord,
+} from "./types.js";
 import {
   isProviderUnreachableWebhookUrl,
   providerRequiresPublicWebhook,
@@ -250,9 +254,26 @@ async function createRealtimeInstructionsResolver(params: {
   return (call) => {
     const numberRouteKey = resolveVoiceCallNumberRouteKeyForCall(call);
     const effectiveConfig = resolveVoiceCallEffectiveConfig(params.config, numberRouteKey).config;
-    return (
-      instructionsByAgentId.get(resolveCallAgentId(call, effectiveConfig)) ?? genericInstructions
-    );
+    const baseInstructions =
+      instructionsByAgentId.get(resolveCallAgentId(call, effectiveConfig)) ?? genericInstructions;
+    const privateInstructions = call.metadata?.realtimeInstructions;
+    if (privateInstructions === undefined) {
+      return baseInstructions;
+    }
+    if (
+      call.direction !== "outbound" ||
+      call.metadata?.mode !== "conversation" ||
+      !effectiveConfig.realtime.enabled
+    ) {
+      throw new Error(
+        "realtimeInstructions requires an enabled outbound realtime conversation call",
+      );
+    }
+    const parsed = RealtimeCallInstructionsSchema.safeParse(privateInstructions);
+    if (!parsed.success) {
+      throw new Error(REALTIME_CALL_INSTRUCTIONS_ERROR);
+    }
+    return `${baseInstructions}\n\nPrivate instructions for this call:\n${parsed.data}`;
   };
 }
 

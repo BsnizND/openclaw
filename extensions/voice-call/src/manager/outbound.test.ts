@@ -124,6 +124,33 @@ describe("voice-call outbound helpers", () => {
     generateNotifyTwimlMock.mockReturnValue("<Response />");
   });
 
+  it.each([
+    { mode: "notify", enabled: true, instructions: "Private brief" },
+    { mode: "conversation", enabled: false, instructions: "Private brief" },
+    { mode: "conversation", enabled: true, instructions: "   " },
+    { mode: "conversation", enabled: true, instructions: "x".repeat(20_001) },
+  ])(
+    "rejects private instructions before any call effect (mode=$mode realtime=$enabled)",
+    async ({ mode, enabled, instructions }) => {
+      const dial = vi.fn(async () => ({ providerCallId: "provider-brief", status: "initiated" }));
+      const ctx = {
+        ...createDialContext({ realtime: { enabled } }),
+        provider: { name: "plivo", initiateCall: dial },
+      };
+      const result = await initiateCall(ctx as never, "+14155550123", undefined, {
+        mode,
+        message: "Public opening",
+        realtimeInstructions: instructions,
+      } as never);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("realtimeInstructions");
+      expect(dial).not.toHaveBeenCalled();
+      expect(persistCallRecordMock).not.toHaveBeenCalled();
+      expect(generateNotifyTwimlMock).not.toHaveBeenCalled();
+      expect(ctx.activeCalls.size).toBe(0);
+    },
+  );
+
   it("guards initiateCall when provider, webhook, capacity, or fromNumber are missing", async () => {
     const base = {
       mutationQueue: new KeyedAsyncQueue(),

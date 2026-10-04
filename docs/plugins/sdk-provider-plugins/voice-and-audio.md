@@ -352,6 +352,13 @@ Register each capability inside `register(api)` alongside your existing
     permissions. Closure or connection replacement retires that callback's
     authority rather than transferring it to the next speaker or connection.
 
+    A bridge request may set `agentConsultEnabled: false` when its current
+    tool policy forbids delegation. Providers must describe that disabled
+    capability accurately in model instructions. This does not remove the
+    transport's lifecycle callback; the host still rejects any unexpected
+    consult request at its authority boundary. Omission preserves the normal
+    delegation-enabled behavior.
+
     The host binds steering authority to the actual admitted backend attempt
     after harness policy preparation. Backing agent harnesses forward the
     existing attempt fingerprint when registering their handle. Realtime voice

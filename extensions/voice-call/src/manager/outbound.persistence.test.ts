@@ -13,6 +13,37 @@ const { cleanup, createContext, createProvider, setup } = createEventManagerHarn
 beforeEach(setup);
 afterEach(cleanup);
 
+it("preserves private realtime instructions through native call updates and restoration", async () => {
+  const dial = vi.fn(createProvider().initiateCall);
+  const ctx = createContext({
+    provider: createProvider({ initiateCall: dial }),
+    webhookUrl: "https://example.com/voice/webhook",
+  });
+  ctx.config.realtime.enabled = true;
+  const result = await initiateCall(ctx, "+15550000001", undefined, {
+    mode: "conversation",
+    message: "Public opening",
+    realtimeInstructions: "Private task brief",
+  });
+  expect(result.success).toBe(true);
+  await processEvent(ctx, {
+    type: "call.answered",
+    id: "answered-brief",
+    callId: result.callId,
+    providerCallId: "provider-call-id",
+    timestamp: Date.now(),
+  });
+  expect(dial.mock.calls[0]?.[0]).not.toHaveProperty("realtimeInstructions");
+  const restored = (await loadActiveCallsFromStore(ctx.storePath)).activeCalls.get(result.callId);
+  expect(restored?.metadata).toMatchObject({
+    initialMessage: "Public opening",
+    realtimeInstructions: "Private task brief",
+  });
+  expect((await getCallHistoryFromStore(ctx.storePath))[0]?.metadata).toMatchObject({
+    realtimeInstructions: "Private task brief",
+  });
+});
+
 it.each([
   { phase: "active", requestUuid: undefined, payload: "CallUUID-only parser control" },
   { phase: "active", requestUuid: "request-uuid", payload: "complete callback" },

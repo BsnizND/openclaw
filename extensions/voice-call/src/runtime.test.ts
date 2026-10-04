@@ -475,6 +475,34 @@ describe("createVoiceCallRuntime lifecycle", () => {
     expect(supportRegistration.instructions).toContain("- Name: Support Voice");
     expect(supportRegistration.instructions).not.toContain("Main Voice");
 
+    for (const [callId, brief, otherBrief] of [
+      ["brief-a", "Private brief A", "Private brief B"],
+      ["brief-b", "Private brief B", "Private brief A"],
+    ]) {
+      const registration = resolveCallRegistration({
+        callId,
+        direction: "outbound",
+        agentId: "support",
+        from: "+15550001111",
+        to: "+15550002222",
+        metadata: { mode: "conversation", realtimeInstructions: brief },
+      });
+      expect(registration.instructions).toContain(brief);
+      expect(registration.instructions).not.toContain(otherBrief);
+      expect(registration.instructions).toContain("- Name: Support Voice");
+      expect(registration.instructions.match(/Agent context:/g)).toHaveLength(1);
+    }
+    expect(defaultRegistration.instructions).not.toContain("Private brief");
+    expect(() =>
+      resolveCallRegistration({
+        callId: "brief-inbound",
+        direction: "inbound",
+        from: "+15550002222",
+        to: "+15550001111",
+        metadata: { mode: "conversation", realtimeInstructions: "Private brief A" },
+      }),
+    ).toThrow("realtimeInstructions");
+
     const unknownRegistration = resolveCallRegistration({
       callId: "call-unknown",
       agentId: "unknown",

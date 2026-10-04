@@ -73,6 +73,10 @@ describe("Voice Call provider-owned delegation", () => {
           throw new Error("Native delegation was not wired to the carrier session");
         }
         expect(request.tools).toEqual([]);
+        expect(request).toMatchObject({ agentConsultEnabled: outcome !== "disabled" });
+        if (outcome === "disabled") {
+          expect(request.instructions).not.toContain("Use native agent delegation");
+        }
         const result = request.runAgentConsult({
           prompt: "Read my itinerary",
           signal: controller.signal,

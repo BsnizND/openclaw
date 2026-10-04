@@ -4,6 +4,15 @@ import type { CallMode } from "./config.js";
 const ProviderNameSchema = z.enum(["telnyx", "twilio", "plivo", "mock"]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
+/** Private model instructions accepted only for an outbound realtime conversation. */
+export const RealtimeCallInstructionsSchema = z
+  .string()
+  .max(20_000)
+  .refine((value) => value.trim().length > 0);
+
+export const REALTIME_CALL_INSTRUCTIONS_ERROR =
+  "realtimeInstructions must be a nonempty string of at most 20000 characters";
+
 /** Internal call identifier (UUID) */
 export type CallId = string;
 
@@ -209,6 +218,8 @@ export type GetCallStatusResult = {
 export type OutboundCallOptions = {
   /** Message to speak when call connects */
   message?: string;
+  /** Private model instructions appended to this realtime conversation only; never the opening. */
+  realtimeInstructions?: string;
   /** Call mode (overrides config default) */
   mode?: CallMode;
   /** DTMF digits to send after the call is connected */

@@ -2,7 +2,11 @@
 import { timestampMsToIsoString } from "openclaw/plugin-sdk/number-runtime";
 import type { CallMode } from "./config.js";
 import type { VoiceCallRuntime } from "./runtime.js";
-import type { CallRecord } from "./types.js";
+import {
+  REALTIME_CALL_INSTRUCTIONS_ERROR,
+  RealtimeCallInstructionsSchema,
+  type CallRecord,
+} from "./types.js";
 
 type VoiceCallStatus = Pick<
   CallRecord,
@@ -94,6 +98,7 @@ export function createVoiceCallCommandService(ensureRuntime: () => Promise<Voice
       params: {
         to?: string;
         message?: string;
+        realtimeInstructions?: unknown;
         mode?: CallMode;
         sessionKey?: string;
         dtmfSequence?: string;
@@ -102,10 +107,18 @@ export function createVoiceCallCommandService(ensureRuntime: () => Promise<Voice
       },
       missingToMessage = "to required",
     ) {
+      const instructions =
+        params.realtimeInstructions === undefined
+          ? undefined
+          : RealtimeCallInstructionsSchema.safeParse(params.realtimeInstructions);
+      if (instructions && !instructions.success) {
+        throw new VoiceCallCommandInputError(REALTIME_CALL_INSTRUCTIONS_ERROR);
+      }
       const rt = await ensureRuntime();
       const to = requireInput(params.to ?? rt.config.toNumber, missingToMessage);
       const result = await rt.manager.initiateCall(to, params.sessionKey, {
         message: params.message,
+        ...(instructions?.success ? { realtimeInstructions: instructions.data } : {}),
         mode: params.mode,
         dtmfSequence: params.dtmfSequence,
         ...(params.requesterSessionKey ? { requesterSessionKey: params.requesterSessionKey } : {}),
@@ -161,7 +174,11 @@ export function createVoiceCallCommandService(ensureRuntime: () => Promise<Voice
     async status(callId?: string) {
       const rt = await ensureRuntime();
       if (!callId) {
-        return { found: true, calls: rt.manager.getActiveCalls().map(toVoiceCallStatus) };
+        return {
+          found: true,
+          capabilities: { perCallRealtimeInstructions: true },
+          calls: rt.manager.getActiveCalls().map(toVoiceCallStatus),
+        };
       }
       const call = await rt.manager.getCallFromMemoryOrStore(callId);
       return call ? { found: true, call: toVoiceCallStatus(call) } : { found: false };

@@ -42,6 +42,7 @@ import type { CallRecord, EndReason, NormalizedEvent } from "../types.js";
 import type { WebhookResponsePayload } from "../webhook.types.js";
 import { WebSocket, WebSocketServer } from "../websocket.js";
 import { RealtimeAudioPacer } from "./realtime-audio-pacer.js";
+import { buildBridgeInstructions, buildGreetingInstructions } from "./realtime-instructions.js";
 import type { StreamDisconnectLifecycle } from "./stream-disconnect-grace.js";
 import {
   type StreamFrameAdapter,
@@ -75,21 +76,6 @@ const MAX_PARTIAL_USER_TRANSCRIPT_CHARS = 1_200;
 const RECENT_FINAL_USER_TRANSCRIPT_TTL_MS = 2_000;
 const BARGE_IN_REQUIRED_LOUD_CHUNKS = 2;
 const logger = createSubsystemLogger("voice-call/realtime");
-
-function buildGreetingInstructions(
-  baseInstructions: string | undefined,
-  greeting: string | undefined,
-): string | undefined {
-  const trimmedGreeting = greeting?.trim();
-  if (!trimmedGreeting) {
-    return undefined;
-  }
-  const intro =
-    "Start the call by greeting the caller naturally. Include this greeting in your first spoken reply:";
-  return baseInstructions
-    ? `${baseInstructions}\n\n${intro} "${trimmedGreeting}"`
-    : `${intro} "${trimmedGreeting}"`;
-}
 
 function normalizeTranscriptText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -1017,9 +1003,12 @@ export class RealtimeCallHandler {
       capabilities,
       audioFormat: REALTIME_VOICE_AUDIO_FORMAT_G711_ULAW_8KHZ,
       interruptResponseOnInputAudio,
-      instructions: handlesAgentConsult
-        ? `${instructions}\n\nUse native agent delegation for OpenClaw work. End-call and custom realtime function tools are unavailable in this session; the caller can hang up to end the call.`
-        : instructions,
+      instructions: buildBridgeInstructions(
+        instructions,
+        handlesAgentConsult,
+        toolPolicy !== "none",
+      ),
+      agentConsultEnabled: toolPolicy !== "none",
       tools: handlesAgentConsult ? [] : this.config.tools,
       ...(handlesAgentConsult
         ? {

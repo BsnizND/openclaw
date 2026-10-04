@@ -221,6 +221,7 @@ export function createRealtimeVoiceBridgeSession(
     autoRespondToAudio: params.autoRespondToAudio,
     interruptResponseOnInputAudio: params.interruptResponseOnInputAudio,
     tools: params.tools,
+    agentConsultEnabled: params.agentConsultEnabled,
     ...(runAgentConsult
       ? {
           runAgentConsult: async (request) => {

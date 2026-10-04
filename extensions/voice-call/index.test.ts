@@ -3,11 +3,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Command } from "commander";
-import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OpenClawPluginApi } from "./api.js";
+import {
+  createCallRecord,
+  createPrivateCallRecord,
+  createRuntimeStub,
+  expectRedactedVoiceCallStatus,
+  firstRespondCall,
+  mockCall,
+  noopLogger,
+  setup,
+  type Registered,
+  type TestGatewayHandler,
+} from "./index.test-harness.js";
 import type { VoiceCallRuntime } from "./runtime-entry.js";
-import type { CallRecord } from "./src/types.js";
 
 let runtimeStub: VoiceCallRuntime;
 const callGatewayFromCliMock = vi.hoisted(() => vi.fn());
@@ -24,38 +33,6 @@ vi.mock("openclaw/plugin-sdk/gateway-runtime", async (importOriginal) => ({
 import plugin from "./index.js";
 import { createVoiceCallRuntime } from "./runtime-entry.js";
 
-const noopLogger = {
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-};
-
-type TestGatewayHandler = (ctx: {
-  params: Record<string, unknown>;
-  client?: { internal?: { pluginRuntimeOwnerId?: string } };
-  respond: ReturnType<typeof vi.fn>;
-}) => Promise<void>;
-
-type Registered = {
-  methods: Map<string, unknown>;
-  methodScopes: Map<string, string | undefined>;
-  tools: unknown[];
-  service?: Parameters<OpenClawPluginApi["registerService"]>[0];
-};
-type MockCallSource = {
-  mock: {
-    calls: ArrayLike<ReadonlyArray<unknown>>;
-  };
-};
-type RespondCall = [
-  ok: boolean,
-  payload?: Record<string, unknown>,
-  error?: {
-    code?: unknown;
-    message?: unknown;
-  },
-];
 type RegisterVoiceCall = (api: Record<string, unknown>) => void;
 type RegisterCliContext = {
   program: Command;
@@ -76,69 +53,6 @@ function captureStdout() {
   };
 }
 
-function createRuntimeStub(callId = "call-1"): VoiceCallRuntime {
-  const call = createCallRecord({ callId });
-  return {
-    config: {
-      toNumber: "+15550001234",
-      realtime: { enabled: false },
-    } as VoiceCallRuntime["config"],
-    provider: {} as VoiceCallRuntime["provider"],
-    manager: {
-      initiateCall: vi.fn(async () => ({ callId, success: true })),
-      continueCall: vi.fn(async () => ({
-        success: true,
-        transcript: "hello",
-      })),
-      speak: vi.fn(async () => ({ success: true })),
-      sendDtmf: vi.fn(async () => ({ success: true })),
-      endCall: vi.fn(async () => ({ success: true })),
-      getCall: vi.fn((id: string) => (id === callId ? call : undefined)),
-      getCallByProviderCallId: vi.fn(() => undefined),
-      getCallFromMemoryOrStore: vi.fn(async (id: string) => (id === callId ? call : undefined)),
-      getActiveCalls: vi.fn(() => [call]),
-      getCallHistory: vi.fn(async () => []),
-    } as unknown as VoiceCallRuntime["manager"],
-    webhookServer: {
-      speakRealtime: vi.fn(() => ({ success: false, error: "No active realtime bridge for call" })),
-    } as unknown as VoiceCallRuntime["webhookServer"],
-    webhookUrl: "http://127.0.0.1:3334/voice/webhook",
-    publicUrl: null,
-    stop: vi.fn(async () => {}),
-  };
-}
-
-function createCallRecord(overrides: Partial<CallRecord> = {}): CallRecord {
-  return {
-    callId: "call-1",
-    provider: "mock",
-    direction: "outbound",
-    state: "active",
-    from: "+15550001111",
-    to: "+15550001234",
-    startedAt: Date.UTC(2026, 4, 2, 9, 0, 0),
-    transcript: [],
-    processedEventIds: [],
-    ...overrides,
-  };
-}
-
-function createPrivateCallRecord(): CallRecord {
-  return createCallRecord({
-    metadata: { requesterSessionKey: "agent:main:discord:channel:general" },
-    processedEventIds: ["evt-1"],
-    sessionKey: "agent:main:voice:call-1",
-    transcript: [
-      {
-        timestamp: Date.UTC(2026, 4, 2, 9, 1, 0),
-        speaker: "user",
-        text: "private call transcript",
-        isFinal: true,
-      },
-    ],
-  });
-}
-
 function createServiceContext(): Parameters<NonNullable<Registered["service"]>["start"]>[0] {
   return {
     config: {},
@@ -147,59 +61,8 @@ function createServiceContext(): Parameters<NonNullable<Registered["service"]>["
   } as Parameters<NonNullable<Registered["service"]>["start"]>[0];
 }
 
-function setup(
-  config: Record<string, unknown>,
-  toolContext: Record<string, unknown> = {},
-): Registered {
-  const methods = new Map<string, unknown>();
-  const methodScopes = new Map<string, string | undefined>();
-  const tools: unknown[] = [];
-  let service: Registered["service"];
-  const api = createTestPluginApi({
-    id: "voice-call",
-    name: "Voice Call",
-    description: "test",
-    version: "0",
-    source: "test",
-    registrationMode: "full",
-    config: {},
-    pluginConfig: config,
-    runtime: { tts: { textToSpeechTelephony: vi.fn() } } as unknown as OpenClawPluginApi["runtime"],
-    logger: noopLogger,
-    registerGatewayMethod: (method: string, handler: unknown, opts?: { scope?: string }) => {
-      methods.set(method, handler);
-      methodScopes.set(method, opts?.scope);
-    },
-    registerTool: (tool: unknown) =>
-      tools.push(
-        typeof tool === "function"
-          ? (tool as (context: Record<string, unknown>) => unknown)(toolContext)
-          : tool,
-      ),
-    registerCli: () => {},
-    registerService: (registeredService) => {
-      service = registeredService;
-    },
-    resolvePath: (p: string) => p,
-  });
-  plugin.register(api);
-  return { methods, methodScopes, tools, service };
-}
-
 function envRef(id: string) {
   return { source: "env" as const, provider: "default", id };
-}
-
-function mockCall(source: MockCallSource, callIndex = 0): ReadonlyArray<unknown> {
-  const call = source.mock.calls[callIndex];
-  if (!call) {
-    throw new Error(`expected mock call ${callIndex}`);
-  }
-  return call;
-}
-
-function firstRespondCall(source: MockCallSource): RespondCall {
-  return mockCall(source) as unknown as RespondCall;
 }
 
 function firstRuntimeConfig(): VoiceCallRuntime["config"] | undefined {
@@ -207,22 +70,6 @@ function firstRuntimeConfig(): VoiceCallRuntime["config"] | undefined {
     | { config?: VoiceCallRuntime["config"] }
     | undefined;
   return options?.config;
-}
-
-function expectRedactedVoiceCallStatus(value: unknown): void {
-  expect(value).toEqual({
-    callId: "call-1",
-    provider: "mock",
-    direction: "outbound",
-    state: "active",
-    startedAt: Date.UTC(2026, 4, 2, 9, 0, 0),
-  });
-  expect(value).not.toHaveProperty("from");
-  expect(value).not.toHaveProperty("to");
-  expect(value).not.toHaveProperty("sessionKey");
-  expect(value).not.toHaveProperty("transcript");
-  expect(value).not.toHaveProperty("processedEventIds");
-  expect(value).not.toHaveProperty("metadata");
 }
 
 async function registerVoiceCallCli(
@@ -541,23 +388,6 @@ describe("voice-call plugin", () => {
     expectRedactedVoiceCallStatus(payload?.call);
   });
 
-  it("returns redacted active call status list", async () => {
-    const call = createPrivateCallRecord();
-    runtimeStub.manager.getActiveCalls = vi.fn(() => [call]);
-    const { methods } = setup({ provider: "mock" });
-    const handler = methods.get("voicecall.status") as TestGatewayHandler | undefined;
-    const respond = vi.fn();
-
-    await handler?.({ params: {}, respond });
-
-    const [ok, payload] = firstRespondCall(respond);
-    expect(ok).toBe(true);
-    expect(payload?.found).toBe(true);
-    const calls = (payload?.calls as unknown[] | undefined) ?? [];
-    expect(calls).toHaveLength(1);
-    expectRedactedVoiceCallStatus(calls[0]);
-  });
-
   it("sends DTMF via voicecall.dtmf", async () => {
     const { methods } = setup({ provider: "mock" });
     const handler = methods.get("voicecall.dtmf") as TestGatewayHandler | undefined;
@@ -698,36 +528,6 @@ describe("voice-call plugin", () => {
     expect(error?.message).toContain("endReason=completed");
     expect(error?.message).not.toContain("endedAt=");
   });
-
-  it.each([{ action: "initiate_call", message: "Hello" }, { message: "Hello" }])(
-    "freezes invocation context for tool-created calls ($action)",
-    async (params) => {
-      const { tools } = setup(
-        { provider: "mock" },
-        { agentId: "support", sessionKey: "agent:support:discord:channel:general" },
-      );
-      const tool = tools[0] as {
-        execute: (id: string, params: unknown) => Promise<unknown>;
-      };
-
-      await tool.execute("id", {
-        ...params,
-        to: "+15550001234",
-        requesterSessionKey: "agent:spoofed:requester",
-        sessionKey: "agent:support:voice:call-1",
-      });
-
-      expect(runtimeStub.manager["initiateCall"]).toHaveBeenCalledWith(
-        "+15550001234",
-        "agent:support:voice:call-1",
-        expect.objectContaining({
-          agentId: "support",
-          message: "Hello",
-          requesterSessionKey: "agent:support:discord:channel:general",
-        }),
-      );
-    },
-  );
 
   it("does not expose requester session identity to the model", () => {
     const { tools } = setup({ provider: "mock" });
@@ -1161,4 +961,3 @@ describe("voice-call plugin", () => {
     expect(output).toContain("live-call: started call-1");
   });
 });
-/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

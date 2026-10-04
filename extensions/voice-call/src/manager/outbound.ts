@@ -11,6 +11,8 @@ import { resolvePreferredTtsVoice } from "../tts-provider-voice.js";
 import {
   type EndReason,
   TerminalStates,
+  RealtimeCallInstructionsSchema,
+  REALTIME_CALL_INSTRUCTIONS_ERROR,
   type CallId,
   type CallRecord,
   type OutboundCallOptions,
@@ -128,6 +130,19 @@ export async function initiateCall(
     typeof options === "string" ? { message: options } : (options ?? {});
   const initialMessage = opts.message;
   const mode = opts.mode ?? ctx.config.outbound.defaultMode;
+  const realtimeInstructions = opts.realtimeInstructions;
+  if (realtimeInstructions !== undefined) {
+    if (!RealtimeCallInstructionsSchema.safeParse(realtimeInstructions).success) {
+      return { callId: "", success: false, error: REALTIME_CALL_INSTRUCTIONS_ERROR };
+    }
+    if (mode !== "conversation" || !ctx.config.realtime.enabled) {
+      return {
+        callId: "",
+        success: false,
+        error: "realtimeInstructions requires an enabled realtime conversation call",
+      };
+    }
+  }
   const dtmfSequence = opts.dtmfSequence;
   const requesterSessionKey = opts.requesterSessionKey?.trim();
   const agentId = normalizeAgentId(opts.agentId ?? ctx.config.agentId);
@@ -187,6 +202,7 @@ export async function initiateCall(
     processedEventIds: [],
     metadata: {
       ...(initialMessage && { initialMessage }),
+      ...(realtimeInstructions !== undefined ? { realtimeInstructions } : {}),
       mode,
       ...(requesterSessionKey ? { requesterSessionKey } : {}),
     },
